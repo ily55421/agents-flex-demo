@@ -1,0 +1,34 @@
+server:
+  port: 8080
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: agents-flex-agent-showcase
+
+# 默认使用 DeepSeek 的 OpenAI-compatible 接口；部署环境仍可通过环境变量覆盖全部连接参数。
+# API Key 由 UI 配置或通过环境变量注入；此文件不保存任何真实密钥。
+agents-flex:
+  model:
+    provider: ${LLM_PROVIDER:deepseek}
+    endpoint: ${LLM_ENDPOINT:https://api.deepseek.com}
+    request-path: ${LLM_REQUEST_PATH:/chat/completions}
+    api-key: ${LLM_API_KEY:}
+    model: ${LLM_MODEL:deepseek-chat}
+    temperature: ${LLM_TEMPERATURE:0.2}
+    thinking-enabled: ${LLM_THINKING_ENABLED:false}
+    thinking-protocol: ${LLM_THINKING_PROTOCOL:none}
+    seed: ${LLM_SEED:}
+    top-p: ${LLM_TOP_P:}
+    top-k: ${LLM_TOP_K:}
+    max-tokens: ${LLM_MAX_TOKENS:}
+    include-usage: ${LLM_INCLUDE_USAGE:true}
+    response-format: ${LLM_RESPONSE_FORMAT:NONE}
+    retry-enabled: ${LLM_RETRY_ENABLED:true}
+    retry-count: ${LLM_RETRY_COUNT:2}
+    retry-initial-delay-millis: ${LLM_RETRY_INITIAL_DELAY_MILLIS:600}
+
+logging:
+  level:
+    com.agentsflex.showcase: INFO
