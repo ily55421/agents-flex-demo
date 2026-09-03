@@ -210,7 +210,6 @@ final class RunViewMapper {
         value.put("correlationId", suspension.getCorrelationId());
         value.put("message", suspension.getMessage());
         value.put("resumePhase", suspension.getResumeExecutionPoint().name());
-        // 2.2.8 将表单/审批字段从 metadata 提升为强类型 getter；继续投影到旧的
         // metadata JSON 契约，确保既兼容现有前端，也不会丢失新版字段。
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (suspension.getMetadata() != null) {
