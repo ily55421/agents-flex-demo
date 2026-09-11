@@ -30,6 +30,7 @@ import com.agentsflex.showcase.config.ModelProperties;
 import com.agentsflex.showcase.config.ModelConfiguration;
 import com.agentsflex.showcase.knowledge.KnowledgeService;
 import com.agentsflex.showcase.model.CreateAgentRequest;
+import com.agentsflex.showcase.model.UpdateModelRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -289,6 +290,39 @@ public final class ResearchAgentFactory {
                 .maxAttachedTurns(request.getMaxAttachedTurns())
                 .maxAttachedMessages(request.getMaxAttachedMessages())
                 .build();
+    }
+
+    /**
+     * 仅应用聊天模型连接配置到服务端内存，不构建 Agent。
+     *
+     * <p>页面“应用配置”可以立即让模型状态生效并反映到头部与输入框可用性上；后续创建 Agent
+     * 仍会再次合并同一份配置。apiKey 只留在内存，返回值使用不含密钥的公开视图。</p>
+     *
+     * @param request 模型连接与采样参数；留空字段沿用当前服务端配置
+     * @return 应用后的不含 API Key 模型状态
+     */
+    public synchronized Map<String, Object> applyModelConnection(UpdateModelRequest request) {
+        CreateAgentRequest carrier = new CreateAgentRequest();
+        carrier.setModelProvider(request.getModelProvider());
+        carrier.setModelEndpoint(request.getModelEndpoint());
+        carrier.setModelRequestPath(request.getModelRequestPath());
+        carrier.setModelApiKey(request.getModelApiKey());
+        carrier.setModelName(request.getModelName());
+        carrier.setModelTemperature(request.getModelTemperature());
+        carrier.setModelThinkingEnabled(request.getModelThinkingEnabled());
+        carrier.setModelThinkingProtocol(request.getModelThinkingProtocol());
+        carrier.setModelSeed(request.getModelSeed());
+        carrier.setModelTopP(request.getModelTopP());
+        carrier.setModelTopK(request.getModelTopK());
+        carrier.setModelMaxTokens(request.getModelMaxTokens());
+        carrier.setModelStop(request.getModelStop());
+        carrier.setModelIncludeUsage(request.getModelIncludeUsage());
+        carrier.setModelResponseFormat(request.getModelResponseFormat());
+        carrier.setModelRetryEnabled(request.getModelRetryEnabled());
+        carrier.setModelRetryCount(request.getModelRetryCount());
+        carrier.setModelRetryInitialDelayMillis(request.getModelRetryInitialDelayMillis());
+        applyModelRequest(carrier);
+        return modelProperties.publicView();
     }
 
     /**

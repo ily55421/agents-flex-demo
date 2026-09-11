@@ -37,15 +37,15 @@ const headerStatistics = computed(() => props.run ? [
 ] : [])
 /** 根据缺失前置条件和 Turn 状态给出准确的输入框提示。 */
 const composerPlaceholder = computed(() => {
-  if (!props.model?.configured) return '请先配置真实模型 API Key'
-  if (!props.agentReady) return '请先在左侧完成 Agent 配置并创建 Agent'
+  if (!props.model?.configured) return '请先点击左侧「⚙ 配置模型」应用模型配置'
+  if (!props.agentReady) return '模型已就绪，点击左侧「创建 Agent」后即可输入对话'
   if (props.busy) return '正在处理请求...'
   if (props.run && !isTerminal.value) return '当前 Turn 完成后可以继续追问'
   return props.run ? '继续追问...' : '输入你希望 AI Agent 完成的任务...'
 })
 /** 在禁用输入时说明当前门控原因，避免用户只能通过按钮样式猜测状态。 */
 const composerStatus = computed(() => {
-  if (!props.model?.configured) return '真实模型尚未配置'
+  if (!props.model?.configured) return '真实模型尚未应用'
   if (!props.agentReady) return '创建 Agent 后即可开始对话'
   if (props.busy) return '正在处理当前操作'
   return '当前 Turn 执行或等待人工操作时不能发送新消息'
@@ -153,8 +153,8 @@ onBeforeUnmount(() => {
             研究并申请发布（触发审批）
           </button>
         </div>
-        <p v-else-if="model?.configured">在左侧配置 Agent 的指令、执行策略、预算、重试与压缩参数，创建成功后即可对话。</p>
-        <p v-else>请在左侧“模型连接”中填写 API Key 并创建 Agent；配置会从当前浏览器自动恢复。</p>
+        <p v-else-if="model?.configured">在左侧配置 Agent 的指令、执行策略、预算、重试与压缩参数，点击「创建 Agent」后即可对话。</p>
+        <p v-else>请点击左侧「⚙ 配置模型」填写模型连接（本地 Ollama / 内网网关无需 API Key），应用后点击「创建 Agent」即可开始对话；配置会从当前浏览器自动恢复。</p>
       </div>
 
       <template v-for="(message, index) in run?.messages ?? []" :key="message.id || index">

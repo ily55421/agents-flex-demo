@@ -20,6 +20,7 @@ import com.agentsflex.core.message.UserMessage;
 import com.agentsflex.showcase.model.ApprovalRequest;
 import com.agentsflex.showcase.model.CreateAgentRequest;
 import com.agentsflex.showcase.model.CreateRunRequest;
+import com.agentsflex.showcase.model.UpdateModelRequest;
 import com.agentsflex.showcase.demo.InMemoryCompressionStateStore;
 import com.agentsflex.showcase.demo.ResearchAgentFactory;
 import com.agentsflex.showcase.demo.ShowcaseTokenEstimator;
@@ -374,6 +375,18 @@ public class ShowcaseRuntime {
     @Cacheable(cacheNames = "modelStatus", key = "'current'")
     public Map<String, Object> modelStatus() {
         return agentFactory.modelInfo();
+    }
+
+    /**
+     * 仅把页面弹窗中的模型连接配置同步到服务端内存，使模型状态立即生效。
+     * 该操作不构建 Agent，也不改变任何已有 Run；创建 Agent 时会再次合并同一份配置。
+     *
+     * @param request 模型连接与采样参数
+     * @return 应用后的不含 API Key 模型状态
+     */
+    @CacheEvict(cacheNames = "modelStatus", allEntries = true)
+    public Map<String, Object> updateModel(UpdateModelRequest request) {
+        return agentFactory.applyModelConnection(request);
     }
 
     /**

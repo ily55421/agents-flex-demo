@@ -4,6 +4,7 @@ import com.agentsflex.showcase.model.ApprovalRequest;
 import com.agentsflex.showcase.model.CreateRunRequest;
 import com.agentsflex.showcase.model.ContinueConversationRequest;
 import com.agentsflex.showcase.model.FormSubmissionRequest;
+import com.agentsflex.showcase.model.UpdateModelRequest;
 import com.agentsflex.showcase.runtime.ShowcaseRuntime;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
@@ -69,6 +70,17 @@ public class AgentRunController {
     @GetMapping("/model")
     public Map<String, Object> modelStatus() {
         return runtime.modelStatus();
+    }
+
+    /**
+     * 仅应用模型连接配置到服务端内存，使页面“应用配置”立即生效而不必创建 Agent。
+     *
+     * @param request 已通过 Bean Validation 的模型连接与采样参数
+     * @return 应用后的不含 API Key 模型状态
+     */
+    @PostMapping("/model")
+    public Map<String, Object> updateModel(@Valid @RequestBody UpdateModelRequest request) {
+        return runtime.updateModel(request);
     }
 
     /**

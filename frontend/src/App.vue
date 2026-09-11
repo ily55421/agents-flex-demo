@@ -19,10 +19,13 @@ import SessionPanel from '@/components/SessionPanel.vue'
 import TaskComposer from '@/components/TaskComposer.vue'
 import {useAgentRun} from '@/composables/useAgentRun'
 import {knowledgeApi} from '@/api/agent'
-import type {CreateAgentPayload, EmbeddingProfile, JsonSchema} from '@/types/agent'
+import type {CreateAgentPayload, EmbeddingProfile, JsonSchema, ModelProfile} from '@/types/agent'
 
 const store = useAgentRun()
 const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, error, connectionState, sessions} = storeToRefs(store)
+
+/** 知识库面板实例；应用向量配置后主动刷新状态，避免用户看到过期的“未配置”。 */
+const knowledgePanel = ref<{ reload: () => Promise<void> } | null>(null)
 
 /** 顶部页面 Tab：Agent 工作台（默认）/ 纯对话；?view=chat 可直接定位到纯对话页。 */
 const activeTab = ref<'workspace' | 'chat'>(
@@ -56,13 +59,23 @@ function createAgent(configuration: CreateAgentPayload) {
 /** 立即把向量模型配置应用到知识库，用于不等创建 Agent 的独立调试。 */
 function configureEmbedding(profile: EmbeddingProfile) {
   perform(async () => {
-    await knowledgeApi.configureEmbedding({
-      embeddingEndpoint: profile.embeddingEndpoint,
-      embeddingApiKey: profile.embeddingApiKey,
-      embeddingModel: profile.embeddingModel,
-      searchMode: profile.knowledgeSearchMode,
-    })
+    try {
+      await knowledgeApi.configureEmbedding({
+        embeddingEndpoint: profile.embeddingEndpoint,
+        embeddingApiKey: profile.embeddingApiKey,
+        embeddingModel: profile.embeddingModel,
+        searchMode: profile.knowledgeSearchMode,
+      })
+    } finally {
+      // 失败时后端已记录 lastError，仍刷新面板把原因展示出来，避免静默无反馈。
+      knowledgePanel.value?.reload().catch(() => undefined)
+    }
   })
+}
+
+/** 把弹窗中的聊天模型连接同步到后端，让模型状态与输入框可用性立即生效。 */
+function applyModel(profile: ModelProfile) {
+  perform(() => store.applyModelConfiguration(profile))
 }
 
 /** 将聊天输入创建为 READY Run 并立即启动，用户不需要理解两阶段 Runtime 命令。 */
@@ -103,8 +116,9 @@ onMounted(() => {
         <SessionPanel :sessions="sessions" :current-conversation-id="run?.conversationId ?? null" :busy="busy"
                       @new-session="store.newSession" @open="(runId) => perform(() => store.openRun(runId))"/>
         <TaskComposer :busy="busy" :disabled="Boolean(run)" :agent="agent" :show-reset="store.isTerminal"
-                      @create="createAgent" @reset="store.reset" @configure-embedding="configureEmbedding"/>
-        <KnowledgePanel/>
+                      @create="createAgent" @reset="store.reset" @configure-embedding="configureEmbedding"
+                      @apply-model="applyModel"/>
+        <KnowledgePanel ref="knowledgePanel"/>
         <RunControls v-if="run" :run="run" :busy="busy" @start="perform(store.start)"
                      @suspend="perform(store.suspend)" @resume="perform(store.resume)"
                      @cancel="perform(store.cancel)" @refresh="perform(store.refresh)" @reset="store.reset"/>

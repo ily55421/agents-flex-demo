@@ -108,13 +108,49 @@ public class KnowledgeService {
         }
         UniversalEmbeddingProvider newProvider = new UniversalEmbeddingProvider(
                 normalizedEndpoint, apiKey == null ? "" : apiKey.trim(), model.trim());
+        // 先探测再切换：RogueMemory 构建 HNSW 索引时会调用 embeddings 探测维度，
+        // 若服务未实现 /embeddings 会抛出含 HTML 的原始错误，这里提前转成可操作的中文提示。
+        try {
+            newProvider.embed("embedding connectivity probe");
+        } catch (RuntimeException error) {
+            this.lastError = friendlyEmbeddingError(normalizedEndpoint, model.trim(), error);
+            throw new IllegalStateException(this.lastError);
+        }
         closeMemory();
         this.provider = newProvider;
         this.signature = newSignature;
-        openMemory(newProvider);
+        try {
+            openMemory(newProvider);
+        } catch (RuntimeException error) {
+            // 索引初始化失败时退回关键词模式，保证知识库与页面仍可用。
+            this.lastError = friendlyEmbeddingError(normalizedEndpoint, model.trim(), error);
+            this.provider = null;
+            this.signature = null;
+            openMemory(null);
+            throw new IllegalStateException(this.lastError);
+        }
         this.lastError = null;
         ensureSeeded();
         return true;
+    }
+
+    /**
+     * 把 embedding 服务的原始异常整理为一句可操作的中文提示。
+     * 供应商常返回整页 HTML，直接透传会淹没界面，因此剥离标签并截断。
+     *
+     * @param endpoint 服务地址
+     * @param model    模型名
+     * @param error    原始异常
+     * @return 不含 HTML 的单行错误说明
+     */
+    private static String friendlyEmbeddingError(String endpoint, String model, RuntimeException error) {
+        String raw = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        String text = raw.replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim();
+        if (text.length() > 180) text = text.substring(0, 180) + "...";
+        String hint = text.contains("404")
+                ? "该地址未实现 OpenAI 兼容的 /embeddings 路由，请改用支持向量化的服务（如 Ollama http://localhost:11434/v1）"
+                : "请确认服务地址、模型名与密钥可用";
+        return "向量模型不可用（" + model + " @ " + endpoint + "）：" + text + "。" + hint + "。";
     }
 
     /**

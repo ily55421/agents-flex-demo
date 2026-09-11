@@ -7,6 +7,7 @@ import type {
     KnowledgeHit,
     KnowledgeSearchMode,
     KnowledgeStatus,
+    ModelProfile,
     ModelStatus,
     TraceView,
 } from '@/types/agent'
@@ -38,6 +39,9 @@ async function request<T>(root: string, path: string, init?: RequestInit): Promi
 export const agentApi = {
     /** 查询不包含 API Key 的真实模型配置状态。 */
     modelStatus: () => request<ModelStatus>(RUN_API_ROOT, '/model'),
+    /** 仅应用模型连接配置到后端内存，使配置立即生效而不必创建 Agent。 */
+    updateModel: (payload: ModelProfile) =>
+        request<ModelStatus>(RUN_API_ROOT, '/model', {method: 'POST', body: JSON.stringify(payload)}),
     /** 列出后端当前全部 Run Snapshot；前端按 conversationId 聚合为会话窗口。 */
     list: () => request<AgentRun[]>(RUN_API_ROOT, ''),
     /** 使用完整配置在后端构建并注册真实 Agents-Flex Agent。 */

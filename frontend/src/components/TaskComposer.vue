@@ -16,6 +16,7 @@ const emit = defineEmits<{
   create: [configuration: CreateAgentPayload]
   reset: []
   configureEmbedding: [profile: EmbeddingProfile]
+  applyModel: [profile: ModelProfile]
 }>()
 const CONFIG_STORAGE_KEY = 'agents-flex-demo.agent-configuration.v1'
 
@@ -199,7 +200,7 @@ const modelSummary = computed(() => {
   return {chat, embedding}
 })
 
-/** 弹窗“应用配置”：把聊天模型与向量模型字段写回表单（localStorage 自动持久化）。 */
+/** 弹窗“应用配置”：写回表单、持久化到浏览器，并同步到后端使模型状态立即生效。 */
 function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
   if (locked.value) return
   const {profileName: _chatName, ...chatFields} = model
@@ -207,6 +208,11 @@ function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
   Object.assign(form, chatFields, embedFields)
   stopText.value = Array.isArray(form.modelStop) ? form.modelStop.join(', ') : ''
   dialogOpen.value = false
+  emit('applyModel', {...model, modelStop: [...(Array.isArray(model.modelStop) ? model.modelStop : [])]})
+  // 向量模型同时同步给知识库，避免“配置了但没生效”的割裂体验；未填写时跳过。
+  if (embedding.embeddingEndpoint.trim() && embedding.embeddingModel.trim()) {
+    emit('configureEmbedding', {...embedding})
+  }
 }
 </script>
 

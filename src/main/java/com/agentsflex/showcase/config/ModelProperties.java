@@ -287,11 +287,32 @@ public class ModelProperties {
     }
 
     /**
-     * 判断是否已经提供可用密钥。空值和示例占位值都视为未配置。
+     * 判断端点是否指向本机或内网服务（Ollama、vLLM、Xinference、自建网关等）。
+     * 这类 OpenAI 兼容服务通常不校验 Authorization，因此不要求填写 API Key。
+     *
+     * @return 端点主机为 localhost / ::1 / 回环或私有网段时返回 true
+     */
+    public boolean isLocalEndpoint() {
+        if (endpoint == null || endpoint.trim().isEmpty()) return false;
+        String value = endpoint.trim().toLowerCase(java.util.Locale.ROOT);
+        if (value.startsWith("localhost") || value.contains("://localhost")
+                || value.contains("://127.") || value.contains("://[::1]")
+                || value.contains("://0.0.0.0") || value.contains("host.docker.internal")) {
+            return true;
+        }
+        // 常见内网段：192.168.x.x、10.x.x.x、172.16~31.x.x
+        return value.contains("://192.168.") || value.contains("://10.")
+                || value.matches(".*://172\\.(1[6-9]|2[0-9]|3[01])\\..*");
+    }
+
+    /**
+     * 判断是否已经提供可用密钥。空值和示例占位值都视为未配置；
+     * 本机或内网端点属于免鉴权部署，视为已配置。
      *
      * @return 可以创建真实模型请求时返回 true
      */
     public boolean isConfigured() {
+        if (isLocalEndpoint()) return true;
         return apiKey != null && !apiKey.trim().isEmpty()
                 && !"your-api-key".equalsIgnoreCase(apiKey.trim());
     }

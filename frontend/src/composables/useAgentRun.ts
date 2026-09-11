@@ -7,6 +7,7 @@ import type {
     AgentRun,
     CreateAgentPayload,
     CreateRunPayload,
+    ModelProfile,
     ModelStatus,
     SessionSummary,
     TraceView,
@@ -192,6 +193,24 @@ export const useAgentRun = defineStore('agent-run', () => {
             modelStatus.value = await agentApi.modelStatus()
         } catch (cause) {
             error.value = cause instanceof Error ? cause.message : 'Agent 创建失败'
+            throw cause
+        } finally {
+            busy.value = false
+        }
+    }
+
+    /**
+     * 把弹窗中的聊天模型连接配置同步到后端内存并刷新模型状态。
+     * 该动作不创建 Agent，但能让头部指示与输入框可用性立即反映真实配置。
+     * @param configuration 模型连接与采样参数
+     */
+    async function applyModelConfiguration(configuration: ModelProfile) {
+        busy.value = true
+        error.value = null
+        try {
+            modelStatus.value = await agentApi.updateModel(configuration)
+        } catch (cause) {
+            error.value = cause instanceof Error ? cause.message : '模型配置应用失败'
             throw cause
         } finally {
             busy.value = false
@@ -491,6 +510,7 @@ export const useAgentRun = defineStore('agent-run', () => {
         hasRun,
         isTerminal,
         createAgent,
+        applyModelConfiguration,
         create,
         continueConversation,
         initialize,

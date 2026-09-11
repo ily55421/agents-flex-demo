@@ -25,12 +25,16 @@ public class ModelConfiguration {
 
     /**
      * 按当前内存中的模型配置创建独立 ChatModel，支持 UI 在运行时为新 Agent 提供连接参数。
+     * 本机或内网端点通常不校验密钥，留空时填入占位值以满足客户端非空要求。
      *
      * @param properties 已合并环境变量或 UI 配置的模型参数
      * @return 支持工具、流式输出和可观测性的真实模型
      */
     public ChatModel buildChatModel(ModelProperties properties) {
-        String apiKey = properties.isConfigured() ? properties.getApiKey() : "not-configured";
+        String apiKey = properties.getApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty() || "your-api-key".equalsIgnoreCase(apiKey.trim())) {
+            apiKey = properties.isLocalEndpoint() ? "local-model" : "not-configured";
+        }
         return OpenAIChatConfig.builder()
                 .provider(properties.getProvider())
                 .endpoint(properties.getEndpoint())

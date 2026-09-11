@@ -59,6 +59,9 @@ function reload() {
   return run(async () => undefined)
 }
 
+/** 供父组件在应用向量配置后主动刷新面板状态。 */
+defineExpose({reload})
+
 function addTextDocument() {
   if (!newContent.value.trim()) return
   void run(async () => {
