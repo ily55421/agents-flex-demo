@@ -73,6 +73,22 @@ public class UpdateModelRequest {
     @Max(300000)
     private Integer modelRetryInitialDelayMillis;
 
+    @Min(0)
+    @Max(1000000)
+    private Long maxInputTokens;
+
+    @Min(0)
+    @Max(1000000)
+    private Long maxOutputTokens;
+
+    @Min(0)
+    @Max(1000000)
+    private Long maxTotalTokens;
+
+    @Min(0)
+    @Max(10000000)
+    private Long maxAttachedTokens;
+
     public String getModelProvider() {
         return modelProvider;
     }
@@ -215,5 +231,37 @@ public class UpdateModelRequest {
 
     public void setModelRetryInitialDelayMillis(Integer value) {
         this.modelRetryInitialDelayMillis = value;
+    }
+
+    public Long getMaxInputTokens() {
+        return maxInputTokens;
+    }
+
+    public void setMaxInputTokens(Long value) {
+        this.maxInputTokens = value;
+    }
+
+    public Long getMaxOutputTokens() {
+        return maxOutputTokens;
+    }
+
+    public void setMaxOutputTokens(Long value) {
+        this.maxOutputTokens = value;
+    }
+
+    public Long getMaxTotalTokens() {
+        return maxTotalTokens;
+    }
+
+    public void setMaxTotalTokens(Long value) {
+        this.maxTotalTokens = value;
+    }
+
+    public Long getMaxAttachedTokens() {
+        return maxAttachedTokens;
+    }
+
+    public void setMaxAttachedTokens(Long value) {
+        this.maxAttachedTokens = value;
     }
 }

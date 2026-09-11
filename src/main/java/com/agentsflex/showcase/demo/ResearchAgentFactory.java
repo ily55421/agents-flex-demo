@@ -321,6 +321,10 @@ public final class ResearchAgentFactory {
         carrier.setModelRetryEnabled(request.getModelRetryEnabled());
         carrier.setModelRetryCount(request.getModelRetryCount());
         carrier.setModelRetryInitialDelayMillis(request.getModelRetryInitialDelayMillis());
+        if (request.getMaxInputTokens() != null) carrier.setMaxInputTokens(request.getMaxInputTokens());
+        if (request.getMaxOutputTokens() != null) carrier.setMaxOutputTokens(request.getMaxOutputTokens());
+        if (request.getMaxTotalTokens() != null) carrier.setMaxTotalTokens(request.getMaxTotalTokens());
+        if (request.getMaxAttachedTokens() != null) carrier.setMaxAttachedTokens(request.getMaxAttachedTokens());
         applyModelRequest(carrier);
         return modelProperties.publicView();
     }

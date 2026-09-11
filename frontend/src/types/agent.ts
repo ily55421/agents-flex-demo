@@ -299,7 +299,7 @@ export interface CreateRunPayload {
   task: string
 }
 
-// ModelProfile 只覆盖“模型连接”相关字段；配置档案栏可一键切换并整体应用到表单。
+// ModelProfile 只覆盖“模型连接 + 生成预算”相关字段；配置档案栏可一键切换并整体应用到表单。
 export interface ModelProfile {
   profileName: string
   modelProvider: string
@@ -320,6 +320,11 @@ export interface ModelProfile {
   modelRetryEnabled: boolean
   modelRetryCount: number
   modelRetryInitialDelayMillis: number
+  // Agent 级 Token 预算与上下文挂载限制；0 表示不限制（挂载 Token）或无预算（输入/输出/总）。
+  maxInputTokens: number
+  maxOutputTokens: number
+  maxTotalTokens: number
+  maxAttachedTokens: number
 }
 
 // EmbeddingProfile 是 RAG 知识库向量模型档案；与聊天档案共用“内置预设 + 我的档案”机制。

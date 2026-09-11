@@ -48,9 +48,9 @@ const defaults: CreateAgentPayload = {
   maxAttachedTurns: 6,
   maxAttachedTokens: 0,
   maxAttachedMessages: 40,
-  maxInputTokens: 4000,
-  maxOutputTokens: 4000,
-  maxTotalTokens: 4000,
+  maxInputTokens: 16000,
+  maxOutputTokens: 8192,
+  maxTotalTokens: 32000,
   maxToolCalls: 8,
   maxDurationMillis: 1800000,
   maxRetries: 2,
@@ -109,8 +109,11 @@ const editing = ref(true)
 const dialogOpen = ref(false)
 const stopText = ref(Array.isArray(form.modelStop) ? form.modelStop.join(', ') : '')
 if (!Array.isArray(form.modelStop)) form.modelStop = []
-/** Agent 创建成功或 Run 运行时锁定字段，确保正在执行的配置不会被界面误改。 */
+/** Agent 创建成功或 Run 运行时锁定字段，确保正在执行的配置不会被界面误改。
+ *  模型配置弹窗不受此限制：模型与预算随时可改，改完通过“重新配置 Agent”创建新 Agent 生效。 */
 const locked = computed(() => props.busy || props.disabled || !editing.value)
+/** 弹窗只在实际请求进行中禁用；已有会话也允许打开并修改模型配置。 */
+const dialogLocked = computed(() => props.busy)
 
 /** 配置表单发生变化时持久化到当前浏览器，仅保存用户选择，不写入服务端文件。 */
 watch(form, (configuration) => {
@@ -182,6 +185,10 @@ const modelSnapshot = computed<ModelProfile>(() => ({
   modelRetryEnabled: form.modelRetryEnabled,
   modelRetryCount: form.modelRetryCount,
   modelRetryInitialDelayMillis: form.modelRetryInitialDelayMillis,
+  maxInputTokens: form.maxInputTokens,
+  maxOutputTokens: form.maxOutputTokens,
+  maxTotalTokens: form.maxTotalTokens,
+  maxAttachedTokens: form.maxAttachedTokens,
 }))
 
 /** 当前表单“向量模型”字段的只读快照，供模型配置弹窗初始化与编辑。 */
@@ -202,7 +209,7 @@ const modelSummary = computed(() => {
 
 /** 弹窗“应用配置”：写回表单、持久化到浏览器，并同步到后端使模型状态立即生效。 */
 function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
-  if (locked.value) return
+  if (dialogLocked.value) return
   const {profileName: _chatName, ...chatFields} = model
   const {profileName: _embedName, ...embedFields} = embedding
   Object.assign(form, chatFields, embedFields)
@@ -234,15 +241,16 @@ function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
       <div class="model-config-card">
         <div class="model-config-head">
           <span class="model-config-label"><IconSettings :size="15"/>模型配置</span>
-          <button class="text-button" type="button" :disabled="locked" @click="dialogOpen = true">
+          <button class="text-button" type="button" :disabled="dialogLocked" @click="dialogOpen = true">
             ⚙ 配置模型
           </button>
         </div>
         <div class="model-config-summary">
           <span>聊天：<strong>{{ modelSummary.chat }}</strong></span>
           <span>向量：<strong>{{ modelSummary.embedding }}</strong></span>
+          <span>预算：<strong>输出 {{ form.maxOutputTokens || '不限' }} / 总 {{ form.maxTotalTokens || '不限' }} Token</strong></span>
         </div>
-        <p class="model-config-hint">预设快捷填充 + 自由自定义，可另存为个人档案；配置会保存在当前浏览器。</p>
+        <p class="model-config-hint">预设快捷填充 + 自由自定义（含输出与上下文预算）；已有会话也能修改，改后点「重新配置 Agent」生效。</p>
       </div>
 
       <fieldset :disabled="locked">

@@ -26,6 +26,7 @@ function preset(profileName: string, provider: string, endpoint: string, request
     modelThinkingProtocol: 'none', modelSeed: '', modelTopP: null, modelTopK: null,
     modelMaxTokens: null, modelStop: [], modelIncludeUsage: true, modelResponseFormat: 'NONE',
     modelRetryEnabled: true, modelRetryCount: 2, modelRetryInitialDelayMillis: 600,
+    maxInputTokens: 16000, maxOutputTokens: 8192, maxTotalTokens: 32000, maxAttachedTokens: 0,
   }
 }
 
@@ -319,6 +320,25 @@ function close() {
                 <option value="JSON_OBJECT">JSON Object</option>
               </select>
             </div>
+            <div class="field-block field-span section-divider">
+              <span class="group-title">输出与上下文预算</span>
+            </div>
+            <div class="field-block">
+              <ConfigFieldLabel for-id="dl-budget-output" text="输出 Token 上限" help="整个 Agent Turn 可累计生成的输出上限；回答被截断或出现 BUDGET_EXCEEDED 时调大。0 表示不限制。"/>
+              <input id="dl-budget-output" v-model.number="draftModel.maxOutputTokens" type="number" min="0" max="1000000" step="1"/>
+            </div>
+            <div class="field-block">
+              <ConfigFieldLabel for-id="dl-budget-input" text="输入 Token 上限" help="整个 Agent Turn 可累计消耗的输入上限；长上下文或多次工具调用时调大。0 表示不限制。"/>
+              <input id="dl-budget-input" v-model.number="draftModel.maxInputTokens" type="number" min="0" max="1000000" step="1"/>
+            </div>
+            <div class="field-block">
+              <ConfigFieldLabel for-id="dl-budget-total" text="总 Token 上限" help="输入与输出的合计预算；0 表示不限制。"/>
+              <input id="dl-budget-total" v-model.number="draftModel.maxTotalTokens" type="number" min="0" max="1000000" step="1"/>
+            </div>
+            <div class="field-block">
+              <ConfigFieldLabel for-id="dl-budget-attached" text="上下文挂载 Token" help="每轮发送给模型的历史上下文上限；0 表示不限制（由模型窗口决定）。长对话丢历史时调大。"/>
+              <input id="dl-budget-attached" v-model.number="draftModel.maxAttachedTokens" type="number" min="0" max="10000000" step="1"/>
+            </div>
           </div>
         </div>
 
@@ -500,6 +520,18 @@ function close() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px 14px;
+}
+
+.section-divider {
+  border-top: 1px dashed #d1d5db;
+  padding-top: 10px;
+  margin-top: 4px;
+}
+
+.group-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: #374151;
 }
 
 .dialog-fields .field-span {
