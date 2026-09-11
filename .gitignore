@@ -13,4 +13,7 @@ data/
 *.duckdb
 *.duckdb.wal
 
+# 可视化头脑风暴会话产物
+.superpowers/
+
 *.log

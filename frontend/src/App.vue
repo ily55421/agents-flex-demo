@@ -10,15 +10,18 @@ import ChatWorkspace from '@/components/ChatWorkspace.vue'
 import CompressionPanel from '@/components/CompressionPanel.vue'
 import DynamicForm from '@/components/DynamicForm.vue'
 import EventStream from '@/components/EventStream.vue'
+import KnowledgePanel from '@/components/KnowledgePanel.vue'
 import RetryPanel from '@/components/RetryPanel.vue'
 import RunControls from '@/components/RunControls.vue'
 import RunResult from '@/components/RunResult.vue'
+import SessionPanel from '@/components/SessionPanel.vue'
 import TaskComposer from '@/components/TaskComposer.vue'
 import {useAgentRun} from '@/composables/useAgentRun'
-import type {CreateAgentPayload, JsonSchema} from '@/types/agent'
+import {knowledgeApi} from '@/api/agent'
+import type {CreateAgentPayload, EmbeddingProfile, JsonSchema} from '@/types/agent'
 
 const store = useAgentRun()
-const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, error, connectionState} = storeToRefs(store)
+const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, error, connectionState, sessions} = storeToRefs(store)
 
 /** 从普通 USER_INPUT Suspension 提取动态表单 Schema，手工暂停不会误渲染为业务表单。 */
 const formSchema = computed<JsonSchema | null>(() =>
@@ -34,6 +37,18 @@ function perform(action: () => Promise<void>) {
 /** 提交左侧完整配置；后端真实 Agent 创建成功后聊天输入才会解锁。 */
 function createAgent(configuration: CreateAgentPayload) {
   perform(() => store.createAgent(configuration))
+}
+
+/** 立即把向量模型配置应用到知识库，用于不等创建 Agent 的独立调试。 */
+function configureEmbedding(profile: EmbeddingProfile) {
+  perform(async () => {
+    await knowledgeApi.configureEmbedding({
+      embeddingEndpoint: profile.embeddingEndpoint,
+      embeddingApiKey: profile.embeddingApiKey,
+      embeddingModel: profile.embeddingModel,
+      searchMode: profile.knowledgeSearchMode,
+    })
+  })
 }
 
 /** 将聊天输入创建为 READY Run 并立即启动，用户不需要理解两阶段 Runtime 命令。 */
@@ -62,8 +77,11 @@ onMounted(() => {
     <AppHeader :run="run" :connection-state="connectionState"/>
     <main id="main-content" class="dashboard-shell">
       <aside class="left-rail">
+        <SessionPanel :sessions="sessions" :current-conversation-id="run?.conversationId ?? null" :busy="busy"
+                      @new-session="store.newSession" @open="(runId) => perform(() => store.openRun(runId))"/>
         <TaskComposer :busy="busy" :disabled="Boolean(run)" :agent="agent" :show-reset="store.isTerminal"
-                      @create="createAgent" @reset="store.reset"/>
+                      @create="createAgent" @reset="store.reset" @configure-embedding="configureEmbedding"/>
+        <KnowledgePanel/>
         <RunControls v-if="run" :run="run" :busy="busy" @start="perform(store.start)"
                      @suspend="perform(store.suspend)" @resume="perform(store.resume)"
                      @cancel="perform(store.cancel)" @refresh="perform(store.refresh)" @reset="store.reset"/>

@@ -110,8 +110,12 @@ final class DemoAgent {
         view.put("compressionModelCallTimeoutMillis", configuration.getCompressionModelCallTimeoutMillis());
         view.put("compressionMaxInputCharacters", configuration.getCompressionMaxInputCharacters());
         view.put("compressionMaxOutputCharacters", configuration.getCompressionMaxOutputCharacters());
+        // 知识库 embedding 配置回显：只暴露地址与模型，API Key 永远不进入视图。
+        view.put("embeddingEndpoint", configuration.getEmbeddingEndpoint());
+        view.put("embeddingModel", configuration.getEmbeddingModel());
+        view.put("knowledgeSearchMode", configuration.getKnowledgeSearchMode());
         view.put("tools", Arrays.asList("request_user_input", "research_market",
-                "verify_sources", "publish_report"));
+                "verify_sources", "publish_report", "search_knowledge"));
         view.put("approvalPolicy", "发布类副作用工具必须人工审批");
         view.put("createdAt", createdAt);
         return view;

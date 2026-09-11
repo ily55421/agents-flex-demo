@@ -3,12 +3,17 @@ import type {
     AgentRun,
     CreateAgentPayload,
     CreateRunPayload,
+    KnowledgeDocument,
+    KnowledgeHit,
+    KnowledgeSearchMode,
+    KnowledgeStatus,
     ModelStatus,
     TraceView,
 } from '@/types/agent'
 
 const RUN_API_ROOT = '/api/agent/runs'
 const AGENT_API_ROOT = '/api/agent/agents'
+const KNOWLEDGE_API_ROOT = '/api/knowledge'
 
 /**
  * 所有 REST 调用共用的请求入口。
@@ -33,6 +38,8 @@ async function request<T>(root: string, path: string, init?: RequestInit): Promi
 export const agentApi = {
     /** 查询不包含 API Key 的真实模型配置状态。 */
     modelStatus: () => request<ModelStatus>(RUN_API_ROOT, '/model'),
+    /** 列出后端当前全部 Run Snapshot；前端按 conversationId 聚合为会话窗口。 */
+    list: () => request<AgentRun[]>(RUN_API_ROOT, ''),
     /** 使用完整配置在后端构建并注册真实 Agents-Flex Agent。 */
     createAgent: (payload: CreateAgentPayload) =>
         request<AgentDefinition>(AGENT_API_ROOT, '', {method: 'POST', body: JSON.stringify(payload)}),
@@ -68,4 +75,48 @@ export const agentApi = {
     trace: (runId: string) => request<TraceView>(RUN_API_ROOT, `/${runId}/trace`),
     /** 生成同源 SSE 地址；连接与自动重连由 EventSource 自己管理。 */
     eventUrl: (runId: string) => `${RUN_API_ROOT}/${runId}/events`,
+}
+
+export const knowledgeApi = {
+    /** 知识库状态：就绪度、生效 embedding 签名、文档与切片计数。 */
+    status: () => request<KnowledgeStatus>(KNOWLEDGE_API_ROOT, '/status'),
+    /** 已入库文档清单。 */
+    documents: () => request<KnowledgeDocument[]>(KNOWLEDGE_API_ROOT, '/documents'),
+    /** UI 粘贴文本方式添加文档。 */
+    addDocument: (title: string, content: string) =>
+        request<KnowledgeDocument>(KNOWLEDGE_API_ROOT, '/documents', {
+            method: 'POST',
+            body: JSON.stringify({title, content}),
+        }),
+    /** 上传 .txt/.md 文件解析入库；multipart 不能带 JSON Content-Type。 */
+    uploadDocument: async (file: File, title?: string): Promise<KnowledgeDocument> => {
+        const form = new FormData()
+        form.append('file', file)
+        if (title) form.append('title', title)
+        const response = await fetch(`${KNOWLEDGE_API_ROOT}/documents/upload`, {method: 'POST', body: form})
+        if (!response.ok) {
+            const body = (await response.json().catch(() => null)) as { message?: string } | null
+            throw new Error(body?.message || `上传失败 (${response.status})`)
+        }
+        return response.json() as Promise<KnowledgeDocument>
+    },
+    /** 删除文档（RogueMemory namespace + DuckDB 元数据）。 */
+    deleteDocument: (docId: string) =>
+        request<{ deleted: boolean; docId: string }>(KNOWLEDGE_API_ROOT, `/documents/${docId}`, {method: 'DELETE'}),
+    /** 检索测试：返回 TopK 命中片段与生效模式。 */
+    search: (query: string, topK: number) =>
+        request<{ query: string; hits: KnowledgeHit[] }>(KNOWLEDGE_API_ROOT, '/search', {
+            method: 'POST',
+            body: JSON.stringify({query, topK}),
+        }),
+    /** 应用向量模型档案到知识库。 */
+    configureEmbedding: (payload: {
+        embeddingEndpoint: string; embeddingApiKey: string; embeddingModel: string;
+        searchMode: KnowledgeSearchMode
+    }) => request<KnowledgeStatus>(KNOWLEDGE_API_ROOT, '/embedding', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }),
+    /** 重建知识库：清空向量与元数据并重新灌入示例。 */
+    rebuild: () => request<KnowledgeStatus>(KNOWLEDGE_API_ROOT, '/rebuild', {method: 'POST'}),
 }

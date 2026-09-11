@@ -408,6 +408,39 @@ textarea:focus, input:focus, select:focus { border-color: var(--accent); box-sha
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* 会话窗口面板：新建会话入口 + 历史 conversationId 聚合列表。 */
+.session-panel { padding: 13px 15px 9px; }
+.session-panel .section-heading { margin-bottom: 10px; }
+.new-session-button { margin-left: auto; min-height: 32px; padding: 0 10px; font-size: var(--font-small); gap: 5px; }
+.session-empty { margin: 2px 0 6px; color: var(--text-muted); font-size: var(--font-caption); line-height: 1.55; }
+.session-list { list-style: none; margin: 0; padding: 0 0 6px; display: grid; gap: 6px; max-height: 236px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.session-item { width: 100%; display: grid; gap: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); text-align: left; }
+.session-item:hover { border-color: var(--accent); background: var(--accent-soft); }
+.session-item.current { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.session-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); font-size: var(--font-small); font-weight: 600; line-height: 1.4; }
+.session-meta { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--font-micro); }
+.session-status { font-style: normal; font-weight: 700; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-soft); white-space: nowrap; }
+.session-status[data-tone="running"] { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.session-status[data-tone="success"] { color: var(--success); background: var(--accent-soft); border-color: color-mix(in srgb, var(--success) 40%, var(--border)); }
+.session-status[data-tone="danger"] { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.session-status[data-tone="waiting"] { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+
+/* 模型配置档案栏：预设/档案下拉 + 另存/删除，一键切换模型连接字段。 */
+.model-profile-bar { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--border-strong); border-radius: 5px; background: var(--surface-2); }
+.model-profile-bar[data-disabled="true"] { opacity: 0.62; }
+.profile-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.profile-select-label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-soft); font-size: var(--font-small); font-weight: 600; white-space: nowrap; }
+.profile-controls { display: flex; gap: 6px; min-width: 0; }
+.profile-controls select { flex: 1; min-width: 0; height: 36px; }
+.profile-action { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface); color: var(--text-muted); }
+.profile-action:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.profile-action.danger:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+.profile-save-row { display: flex; gap: 6px; align-items: center; }
+.profile-save-row input { height: 36px; }
+.profile-save-row .secondary-button { min-height: 36px; padding: 0 12px; font-size: var(--font-small); }
+.profile-cancel { min-height: 36px; padding: 0 6px; display: inline-flex; align-items: center; }
+.profile-hint { margin: 0; color: var(--text-muted); font-size: var(--font-micro); line-height: 1.5; }
+
 @media (max-width: 1260px) {
   .dashboard-shell { grid-template-columns: 280px minmax(520px, 1fr); align-items: start; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   .left-rail, .workspace-column, .right-rail { max-height: none; overflow: visible; }

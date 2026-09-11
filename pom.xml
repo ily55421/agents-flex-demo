@@ -48,10 +48,26 @@
             <groupId>org.springframework</groupId>
             <artifactId>spring-jdbc</artifactId>
         </dependency>
+        <!-- 连接池：DuckDB 并发打开同一文件会竞态失败，用单实例池复用连接 -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.duckdb</groupId>
             <artifactId>duckdb_jdbc</artifactId>
             <version>0.9.2</version>
+        </dependency>
+        <!-- RogueMemory 嵌入式 AI 记忆层：HNSW 向量 + BM25 混合检索，mmap 持久化，零第三方依赖 -->
+        <dependency>
+            <groupId>com.yomahub</groupId>
+            <artifactId>roguemap-memory</artifactId>
+            <version>1.1.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.yomahub</groupId>
+            <artifactId>roguemap-embedding</artifactId>
+            <version>1.1.5</version>
         </dependency>
         <dependency>
             <groupId>com.agentsflex</groupId>

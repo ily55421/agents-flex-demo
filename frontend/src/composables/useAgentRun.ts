@@ -8,8 +8,13 @@ import type {
     CreateAgentPayload,
     CreateRunPayload,
     ModelStatus,
+    SessionSummary,
     TraceView,
 } from '@/types/agent'
+
+/** 终态集合：这些状态下 Turn 不再推进；会话徽章与结果面板共用该判定。 */
+const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED', 'MAX_ITERATIONS_REACHED',
+    'MAX_STEPS_REACHED', 'BUDGET_EXCEEDED']
 
 export const useAgentRun = defineStore('agent-run', () => {
     // run 是后端 Snapshot 的本地镜像；trace 是 OTel 导出结果，两者共同驱动全部面板。
@@ -17,6 +22,7 @@ export const useAgentRun = defineStore('agent-run', () => {
     const agent = ref<AgentDefinition | null>(null)
     const trace = ref<TraceView | null>(null)
     const modelStatus = ref<ModelStatus | null>(null)
+    const sessions = ref<SessionSummary[]>([])
     const streamingText = ref('')
     const streamingReasoning = ref('')
     const busy = ref(false)
@@ -127,10 +133,51 @@ export const useAgentRun = defineStore('agent-run', () => {
     /** 当前是否已经加载或创建 Run，供需要简化显示逻辑的组件使用。 */
     const hasRun = computed(() => run.value !== null)
     /** 判断当前状态是否为不可再推进的终态，统一控制结果面板和新建入口。 */
-    const isTerminal = computed(() =>
-        ['COMPLETED', 'FAILED', 'CANCELLED', 'MAX_ITERATIONS_REACHED',
-            'MAX_STEPS_REACHED', 'BUDGET_EXCEEDED'].includes(run.value?.status ?? ''),
-    )
+    const isTerminal = computed(() => TERMINAL_STATUSES.includes(run.value?.status ?? ''))
+
+    /**
+     * 拉取后端全部 Run Snapshot 并按 conversationId 聚合为会话窗口列表。
+     * 聚合只读取公开字段；读取失败时保留旧列表，不干扰主对话流程。
+     */
+    async function loadSessions() {
+        try {
+            const snapshots = await agentApi.list()
+            const grouped = new Map<string, SessionSummary>()
+            for (const snapshot of snapshots) {
+                const conversationId = snapshot.conversationId
+                if (!conversationId) continue
+                const updatedAt = Math.max(snapshot.completedAt || 0, snapshot.createdAt)
+                const active = snapshot.processing
+                    || snapshot.status === 'RUNNING'
+                    || snapshot.status === 'RETRY_SCHEDULED'
+                const current = grouped.get(conversationId)
+                if (!current) {
+                    grouped.set(conversationId, {
+                        conversationId,
+                        latestRunId: snapshot.runId,
+                        title: snapshot.task,
+                        status: snapshot.status,
+                        createdAt: snapshot.createdAt,
+                        updatedAt,
+                        turns: 1,
+                        active,
+                    })
+                    continue
+                }
+                current.turns += 1
+                current.active = current.active || active
+                if (updatedAt >= current.updatedAt) {
+                    current.updatedAt = updatedAt
+                    current.latestRunId = snapshot.runId
+                    current.status = snapshot.status
+                    current.title = snapshot.task
+                }
+            }
+            sessions.value = [...grouped.values()].sort((left, right) => right.updatedAt - left.updatedAt)
+        } catch {
+            // 会话列表属于辅助信息：加载失败时静默保留上一次结果，避免打断当前对话。
+        }
+    }
 
     /**
      * 提交完整配置并等待后端真实 Agent Builder 成功；只有成功响应才更新当前 Agent。
@@ -164,6 +211,8 @@ export const useAgentRun = defineStore('agent-run', () => {
             installRun(nextRun)
             installTrace(await agentApi.trace(nextRun.runId))
             scheduleRefresh()
+            // 写命令（创建、启动、继续对话等）都会改变会话列表，这里同步刷新。
+            void loadSessions()
         } catch (cause) {
             error.value = cause instanceof Error ? cause.message : '操作失败'
             throw cause
@@ -205,6 +254,48 @@ export const useAgentRun = defineStore('agent-run', () => {
         }
     }
 
+    /**
+     * 打开会话列表中的任意历史 Turn：恢复 Snapshot、Trace 与 SSE，并把 runId 同步进 URL。
+     * 使用递增令牌丢弃用户快速连续切换会话时的过期响应。
+     * @param runId 目标会话最新的 Turn ID
+     */
+    let openRunToken = 0
+
+    async function openRun(runId: string) {
+        if (run.value?.runId === runId) return
+        const token = ++openRunToken
+        busy.value = true
+        error.value = null
+        try {
+            const [nextRun, nextTrace] = await Promise.all([
+                agentApi.get(runId),
+                agentApi.trace(runId),
+            ])
+            // 请求期间用户又切换了其他会话；丢弃过期响应，不覆盖更新的工作区。
+            if (token !== openRunToken) return
+            resetStreamBuffer()
+            streamingText.value = ''
+            streamingReasoning.value = ''
+            installRun(nextRun)
+            agent.value = nextRun.agent
+            installTrace(nextTrace)
+            setLocationRun(runId)
+            connect(runId)
+        } catch (cause) {
+            error.value = cause instanceof Error ? cause.message : '无法打开会话'
+        } finally {
+            if (token === openRunToken) busy.value = false
+        }
+    }
+
+    /**
+     * 新建会话窗口：清空本地工作区但保留已创建的 Agent；
+     * 下一次发送消息会生成新的 conversationId，旧会话仍保留在会话列表中。
+     */
+    function newSession() {
+        reset()
+    }
+
     /** 启动当前 READY Run。 */
     const start = () => requireRun((id) => execute(() => agentApi.start(id)))
     /** 请求挂起当前 Run。 */
@@ -227,6 +318,7 @@ export const useAgentRun = defineStore('agent-run', () => {
         if (!run.value) return
         try {
             const runId = run.value.runId
+            const previousStatus = run.value.status
             const [nextRun, nextTrace] = await Promise.all([
                 agentApi.get(runId),
                 agentApi.trace(runId),
@@ -239,6 +331,10 @@ export const useAgentRun = defineStore('agent-run', () => {
                 if (nextRun.events.some((item) => item.type === 'MODEL_COMPLETED')) {
                     streamingText.value = ''
                     streamingReasoning.value = ''
+                }
+                // Turn 刚进入终态时同步会话列表，让徽章从“执行中”切换为最终状态。
+                if (previousStatus !== nextRun.status && TERMINAL_STATUSES.includes(nextRun.status)) {
+                    void loadSessions()
                 }
             }
             error.value = null
@@ -257,6 +353,8 @@ export const useAgentRun = defineStore('agent-run', () => {
         } catch (cause) {
             error.value = cause instanceof Error ? cause.message : '无法读取模型配置'
         }
+        // 会话列表与 Run 恢复相互独立：即使没有 URL 参数也展示历史会话窗口。
+        void loadSessions()
         if (run.value) return
         const runId = new URL(window.location.href).searchParams.get('run')
         if (!runId) return
@@ -389,6 +487,7 @@ export const useAgentRun = defineStore('agent-run', () => {
         busy,
         error,
         connectionState,
+        sessions,
         hasRun,
         isTerminal,
         createAgent,
@@ -396,6 +495,9 @@ export const useAgentRun = defineStore('agent-run', () => {
         continueConversation,
         initialize,
         reset,
+        openRun,
+        newSession,
+        loadSessions,
         start,
         suspend,
         resume,

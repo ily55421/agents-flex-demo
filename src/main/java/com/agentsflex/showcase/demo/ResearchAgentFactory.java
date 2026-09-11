@@ -28,6 +28,7 @@ import com.agentsflex.core.message.AiMessage;
 import com.agentsflex.core.message.Message;
 import com.agentsflex.showcase.config.ModelProperties;
 import com.agentsflex.showcase.config.ModelConfiguration;
+import com.agentsflex.showcase.knowledge.KnowledgeService;
 import com.agentsflex.showcase.model.CreateAgentRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,9 +46,9 @@ import java.util.concurrent.locks.LockSupport;
 /**
  * 根据页面完整配置构建可供多个对话复用的真实 Agents-Flex Agent 定义。
  *
- * <p>四个工具覆盖动态表单、普通工具、可重试工具和需审批副作用工具；执行策略同时启用
- * Token/工具/时长预算与上下文压缩。确定性仅来自 ChatModel 和工具返回值，Runtime 行为
- * 仍全部经过 Agents-Flex。</p>
+ * <p>五个工具覆盖动态表单、普通工具、可重试工具、需审批副作用工具和 RAG 知识库检索；
+ * 执行策略同时启用 Token/工具/时长预算与上下文压缩。确定性仅来自 ChatModel 和工具返回值，
+ * Runtime 行为仍全部经过 Agents-Flex。</p>
  */
 @Component
 public final class ResearchAgentFactory {
@@ -56,6 +57,7 @@ public final class ResearchAgentFactory {
     private final ChatModel compressionModel;
     private final ModelProperties modelProperties;
     private final ModelConfiguration modelConfiguration;
+    private final KnowledgeService knowledgeService;
 
     private final ConcurrentMap<String, AtomicInteger> unstableAttempts =
             new ConcurrentHashMap<>();
@@ -65,11 +67,13 @@ public final class ResearchAgentFactory {
      *
      * @param chatModel       application.yml 创建的 OpenAI-compatible 模型
      * @param modelProperties 不含业务状态的模型连接配置
+     * @param modelConfiguration 真实模型构建器
+     * @param knowledgeService RAG 知识库服务，供 search_knowledge 工具调用
      */
     @Autowired
     public ResearchAgentFactory(ChatModel chatModel, ModelProperties modelProperties,
-                                ModelConfiguration modelConfiguration) {
-        this(chatModel, chatModel, modelProperties, modelConfiguration);
+                                ModelConfiguration modelConfiguration, KnowledgeService knowledgeService) {
+        this(chatModel, chatModel, modelProperties, modelConfiguration, knowledgeService);
     }
 
     /**
@@ -79,7 +83,7 @@ public final class ResearchAgentFactory {
      * @param modelProperties 模型状态配置
      */
     public ResearchAgentFactory(ChatModel chatModel, ModelProperties modelProperties) {
-        this(chatModel, chatModel, modelProperties, null);
+        this(chatModel, chatModel, modelProperties, null, null);
     }
 
     /**
@@ -91,7 +95,7 @@ public final class ResearchAgentFactory {
      */
     public ResearchAgentFactory(ChatModel chatModel, ChatModel compressionModel,
                                 ModelProperties modelProperties) {
-        this(chatModel, compressionModel, modelProperties, null);
+        this(chatModel, compressionModel, modelProperties, null, null);
     }
 
     /**
@@ -101,13 +105,16 @@ public final class ResearchAgentFactory {
      * @param compressionModel   上下文摘要模型或测试替身
      * @param modelProperties    服务端默认模型配置
      * @param modelConfiguration 真实模型构建器
+     * @param knowledgeService   RAG 知识库服务；测试可传 {@code null} 跳过知识工具
      */
     public ResearchAgentFactory(ChatModel chatModel, ChatModel compressionModel,
-                                ModelProperties modelProperties, ModelConfiguration modelConfiguration) {
+                                ModelProperties modelProperties, ModelConfiguration modelConfiguration,
+                                KnowledgeService knowledgeService) {
         this.chatModel = chatModel;
         this.compressionModel = compressionModel;
         this.modelProperties = modelProperties;
         this.modelConfiguration = modelConfiguration;
+        this.knowledgeService = knowledgeService;
     }
 
     /**
@@ -126,6 +133,17 @@ public final class ResearchAgentFactory {
                     "尚未配置真实大模型 API Key，请在页面左侧“模型连接”中填写后重新创建 Agent；"
                             + "部署环境也可以通过 LLM_API_KEY 注入默认值。");
         }
+        // 知识库 embedding 与聊天模型一起提交；失败不阻断 Agent 创建，状态在知识库面板可见。
+        if (knowledgeService != null && request.getEmbeddingEndpoint() != null
+                && !request.getEmbeddingEndpoint().trim().isEmpty()) {
+            try {
+                knowledgeService.configure(request.getEmbeddingEndpoint(), request.getEmbeddingApiKey(),
+                        request.getEmbeddingModel(), request.getKnowledgeSearchMode());
+            } catch (RuntimeException error) {
+                // 例如签名冲突需要先重建；保留给用户可见的错误在 KnowledgeService.status 中。
+            }
+        }
+        request.setEmbeddingApiKey(null);
         // 用户输入工具携带 JSON Schema；前端只负责通用渲染，不知道研究表单有哪些字段。
         Tool inputTool = AgentUserInputTool.builder()
                 .form(researchBriefForm())
@@ -165,6 +183,16 @@ public final class ResearchAgentFactory {
                 .metadata("sideEffect", true)
                 .metadata("riskLevel", "HIGH")
                 .function(arguments -> "报告已发布到 " + arguments.get("channel"))
+                .build();
+
+        // RAG 知识库检索工具：走 RogueMemory 混合检索（向量 ANN + BM25），命中片段带标题、
+        // 片段序号与相关度分数返回，模型引用时可标注来源。知识库未配置时返回说明文本。
+        Tool knowledgeTool = Tool.builder("search_knowledge",
+                        "检索本地 RAG 知识库，返回与问题最相关的资料片段（含来源与相关度）")
+                .addParameter(Parameter.builder().name("query").type("string").required(true).build())
+                .function(arguments -> knowledgeService == null
+                        ? "知识库服务未启用。"
+                        : knowledgeService.searchForTool(String.valueOf(arguments.get("query"))))
                 .build();
 
         // 按页面选择的 Decider 与 Compressor 组合真实增量压缩，不预置虚假历史。
@@ -244,7 +272,7 @@ public final class ResearchAgentFactory {
                 .instructions(request.getInstructions())
                 .chatModel(activeChatModel)
                 .chatOptions(chatOptions(modelProperties))
-                .tools(Arrays.asList(inputTool, researchTool, unstableTool, publishTool))
+                .tools(Arrays.asList(inputTool, researchTool, unstableTool, publishTool, knowledgeTool))
                 .toolApprovalPolicy((turn, call, tool) ->
                         Boolean.TRUE.equals(tool.getMetadata().get("sideEffect"))
                                 ? ToolApprovalDecision.requireApproval()

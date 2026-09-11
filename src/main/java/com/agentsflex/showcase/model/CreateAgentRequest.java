@@ -51,8 +51,8 @@ public class CreateAgentRequest {
      */
     @NotBlank
     @Size(max = 8000)
-    private String instructions = "你是一个中文 AI 市场研究助手。先理解用户问题；信息不足时调用 request_user_input 请求 research_brief 表单；"
-            + "需要资料时调用 research_market，随后调用 verify_sources 校验来源；只有用户明确要求发布时才调用 publish_report。"
+    private String instructions = "你是一个中文 AI 市场研究助手。先理解用户问题；涉及市场数据、行业趋势或已有研究结论时，优先调用 search_knowledge 检索本地知识库并引用片段来源；"
+            + "信息不足时调用 request_user_input 请求 research_brief 表单；需要补充资料时调用 research_market，随后调用 verify_sources 校验来源；只有用户明确要求发布时才调用 publish_report。"
             + "收到 request_user_input 的 submitted 工具结果后，data 中的字段视为用户已经确认的信息；字段完整且与原任务一致时必须直接继续，"
             + "不得再次以自然语言重复索要相同信息。只有字段缺失或与原任务明确冲突时才向用户说明具体冲突并请求确认。"
             + "不得伪造工具结果，所有最终回答必须使用中文，清楚区分事实、判断与仍需确认的信息。";
@@ -579,6 +579,88 @@ public class CreateAgentRequest {
     @Min(0)
     @Max(10000000)
     private long compressionMaxOutputCharacters;
+
+    /**
+     * 知识库 embedding 服务根地址（OpenAI 兼容，含 /v1），例如 http://127.0.0.1:18888/v1。
+     * 创建 Agent 时与聊天模型一起提交，用于初始化 RAG 知识库；留空时继承服务端配置。
+     */
+    @Size(max = 2048)
+    private String embeddingEndpoint;
+
+    /**
+     * 知识库 embedding 服务密钥；只在后端内存使用，不会进入任何回显视图。
+     * 本地 Ollama 等免鉴权服务可留空。
+     */
+    @Size(max = 4096)
+    private String embeddingApiKey;
+
+    /**
+     * 知识库 embedding 模型名，例如 bge-m3；留空时继承服务端默认值。
+     */
+    @Size(max = 200)
+    private String embeddingModel;
+
+    /**
+     * 知识库检索模式：HYBRID（向量+BM25 混合）、VECTOR_ONLY（纯向量）、KEYWORD_ONLY（纯关键词）。
+     */
+    @Pattern(regexp = "HYBRID|VECTOR_ONLY|KEYWORD_ONLY")
+    private String knowledgeSearchMode;
+
+    /**
+     * @return 知识库 embedding 服务根地址
+     */
+    public String getEmbeddingEndpoint() {
+        return embeddingEndpoint;
+    }
+
+    /**
+     * @param value embedding 服务根地址
+     */
+    public void setEmbeddingEndpoint(String value) {
+        this.embeddingEndpoint = value;
+    }
+
+    /**
+     * @return 知识库 embedding 服务密钥
+     */
+    public String getEmbeddingApiKey() {
+        return embeddingApiKey;
+    }
+
+    /**
+     * @param value embedding 服务密钥；不回显
+     */
+    public void setEmbeddingApiKey(String value) {
+        this.embeddingApiKey = value;
+    }
+
+    /**
+     * @return 知识库 embedding 模型名
+     */
+    public String getEmbeddingModel() {
+        return embeddingModel;
+    }
+
+    /**
+     * @param value embedding 模型名
+     */
+    public void setEmbeddingModel(String value) {
+        this.embeddingModel = value;
+    }
+
+    /**
+     * @return 知识库检索模式
+     */
+    public String getKnowledgeSearchMode() {
+        return knowledgeSearchMode;
+    }
+
+    /**
+     * @param value 知识库检索模式
+     */
+    public void setKnowledgeSearchMode(String value) {
+        this.knowledgeSearchMode = value;
+    }
 
     /**
      * @return UI 选择的模型服务商；为空时使用服务端默认值

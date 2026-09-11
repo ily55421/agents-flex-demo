@@ -278,6 +278,10 @@ export interface CreateAgentPayload {
   compressionModelCallTimeoutMillis: number
   compressionMaxInputCharacters: number
   compressionMaxOutputCharacters: number
+  embeddingEndpoint: string
+  embeddingApiKey: string
+  embeddingModel: string
+  knowledgeSearchMode: KnowledgeSearchMode
 }
 
 // AgentDefinition 是后端完成真实 Agents-Flex Builder 校验后返回的安全配置，不包含任何模型密钥字段。
@@ -291,4 +295,86 @@ export interface AgentDefinition extends Omit<CreateAgentPayload, 'modelApiKey'>
 export interface CreateRunPayload {
   agentId: string
   task: string
+}
+
+// ModelProfile 只覆盖“模型连接”相关字段；配置档案栏可一键切换并整体应用到表单。
+export interface ModelProfile {
+  profileName: string
+  modelProvider: string
+  modelEndpoint: string
+  modelRequestPath: string
+  modelApiKey: string
+  modelName: string
+  modelTemperature: number
+  modelThinkingEnabled: boolean
+  modelThinkingProtocol: string
+  modelSeed: string
+  modelTopP: number | null
+  modelTopK: number | null
+  modelMaxTokens: number | null
+  modelStop: string[]
+  modelIncludeUsage: boolean
+  modelResponseFormat: 'NONE' | 'JSON_OBJECT'
+  modelRetryEnabled: boolean
+  modelRetryCount: number
+  modelRetryInitialDelayMillis: number
+}
+
+// EmbeddingProfile 是 RAG 知识库向量模型档案；与聊天档案共用“内置预设 + 我的档案”机制。
+export interface EmbeddingProfile {
+  profileName: string
+  embeddingEndpoint: string
+  embeddingApiKey: string
+  embeddingModel: string
+  knowledgeSearchMode: KnowledgeSearchMode
+}
+
+export type KnowledgeSearchMode = 'HYBRID' | 'VECTOR_ONLY' | 'KEYWORD_ONLY'
+
+export interface KnowledgeStatus {
+  ready: boolean
+  searchMode: KnowledgeSearchMode
+  topK: number
+  embeddingConfigured: boolean
+  embeddingSignature: string | null
+  embeddingModel: string | null
+  dimension: number
+  documentCount: number
+  chunkCount: number
+  signatures: string[]
+  seeded: boolean
+  lastError: string | null
+  mmapPath: string
+}
+
+export interface KnowledgeDocument {
+  docId: string
+  title: string
+  source: 'MANUAL' | 'FILE' | 'BUILTIN'
+  chunkCount: number
+  charCount: number
+  embeddingSignature: string | null
+  createdAt: number
+}
+
+export interface KnowledgeHit {
+  docId: string
+  title: string | null
+  source: string | null
+  chunkIndex: string | null
+  content: string
+  score: number
+  mode: KnowledgeSearchMode
+}
+
+// SessionSummary 是同一 conversationId 的全部 Turn 在会话列表中的聚合摘要。
+export interface SessionSummary {
+  conversationId: string
+  latestRunId: string
+  title: string
+  status: AgentStatus
+  createdAt: number
+  updatedAt: number
+  turns: number
+  active: boolean
 }

@@ -30,6 +30,15 @@ agents-flex:
     retry-initial-delay-millis: ${LLM_RETRY_INITIAL_DELAY_MILLIS:600}
   persistence:
     duckdb-url: ${DUCKDB_URL:jdbc:duckdb:./data/showcase.duckdb}
+  # RAG 知识库：RogueMemory mmap 目录、默认检索模式与 TopK；embedding 可用环境变量提供默认值。
+  knowledge:
+    mmap-path: ${KNOWLEDGE_MMAP_PATH:./data/knowledge-mem}
+    search-mode: ${KNOWLEDGE_SEARCH_MODE:HYBRID}
+    top-k: ${KNOWLEDGE_TOP_K:5}
+    max-upload-bytes: ${KNOWLEDGE_MAX_UPLOAD_BYTES:2097152}
+    embedding-endpoint: ${EMBEDDING_ENDPOINT:}
+    embedding-api-key: ${EMBEDDING_API_KEY:}
+    embedding-model: ${EMBEDDING_MODEL:bge-m3}
 
 logging:
   level:

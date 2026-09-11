@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import {computed, reactive, ref, watch} from 'vue'
-import {IconAdjustmentsHorizontal, IconCheck, IconEye, IconEyeOff, IconRefresh, IconRobot, IconSettings} from '@tabler/icons-vue'
-import type {AgentDefinition, CreateAgentPayload} from '@/types/agent'
+import {IconAdjustmentsHorizontal, IconCheck, IconDatabase, IconEye, IconEyeOff, IconRefresh, IconRobot, IconSettings} from '@tabler/icons-vue'
+import type {AgentDefinition, CreateAgentPayload, EmbeddingProfile, ModelProfile} from '@/types/agent'
 import ConfigHelpIcon from '@/components/ConfigHelpIcon.vue'
 import ConfigFieldLabel from '@/components/ConfigFieldLabel.vue'
+import ModelProfileBar from '@/components/ModelProfileBar.vue'
 
 const props = defineProps<{
   busy: boolean
@@ -11,7 +12,11 @@ const props = defineProps<{
   agent: AgentDefinition | null
   showReset: boolean
 }>()
-const emit = defineEmits<{ create: [configuration: CreateAgentPayload]; reset: [] }>()
+const emit = defineEmits<{
+  create: [configuration: CreateAgentPayload]
+  reset: []
+  configureEmbedding: [profile: EmbeddingProfile]
+}>()
 const CONFIG_STORAGE_KEY = 'agents-flex-demo.agent-configuration.v1'
 
 const defaults: CreateAgentPayload = {
@@ -36,7 +41,7 @@ const defaults: CreateAgentPayload = {
   name: '市场研究助手',
   version: '1',
   description: '演示 Agents-Flex Agent Runtime 的完整研究任务',
-  instructions: '你是一个中文 AI 市场研究助手。先理解用户问题；信息不足时调用 request_user_input 请求 research_brief 表单；需要资料时调用 research_market，随后调用 verify_sources 校验来源；只有用户明确要求发布时才调用 publish_report。收到 request_user_input 的 submitted 工具结果后，data 中的字段视为用户已经确认的信息；字段完整且与原任务一致时必须直接继续，不得再次以自然语言重复索要相同信息。只有字段缺失或与原任务明确冲突时才向用户说明具体冲突并请求确认。不得伪造工具结果，所有最终回答必须使用中文，清楚区分事实、判断与仍需确认的信息。',
+  instructions: '你是一个中文 AI 市场研究助手。先理解用户问题；涉及市场数据、行业趋势或已有研究结论时，优先调用 search_knowledge 检索本地知识库并引用片段来源；信息不足时调用 request_user_input 请求 research_brief 表单；需要补充资料时调用 research_market，随后调用 verify_sources 校验来源；只有用户明确要求发布时才调用 publish_report。收到 request_user_input 的 submitted 工具结果后，data 中的字段视为用户已经确认的信息；字段完整且与原任务一致时必须直接继续，不得再次以自然语言重复索要相同信息。只有字段缺失或与原任务明确冲突时才向用户说明具体冲突并请求确认。不得伪造工具结果，所有最终回答必须使用中文，清楚区分事实、判断与仍需确认的信息。',
   maxIterations: 8,
   maxSteps: 32,
   maxAttachedTurns: 6,
@@ -82,6 +87,10 @@ const defaults: CreateAgentPayload = {
   compressionModelCallTimeoutMillis: 0,
   compressionMaxInputCharacters: 0,
   compressionMaxOutputCharacters: 0,
+  embeddingEndpoint: 'http://127.0.0.1:18888/v1',
+  embeddingApiKey: '',
+  embeddingModel: 'bge-m3',
+  knowledgeSearchMode: 'HYBRID',
 }
 
 /** 从浏览器恢复上次保存的完整配置；损坏或旧版本数据自动回退到默认值。 */
@@ -97,6 +106,7 @@ function readSavedConfiguration(): Partial<CreateAgentPayload> {
 const form = reactive<CreateAgentPayload>({...defaults, ...readSavedConfiguration()})
 const editing = ref(true)
 const showApiKey = ref(false)
+const showEmbeddingKey = ref(false)
 const stopText = ref(Array.isArray(form.modelStop) ? form.modelStop.join(', ') : '')
 if (!Array.isArray(form.modelStop)) form.modelStop = []
 /** Agent 创建成功或 Run 运行时锁定字段，确保正在执行的配置不会被界面误改。 */
@@ -150,6 +160,60 @@ watch(() => props.agent, (agent) => {
   applyAgent(agent)
   editing.value = false
 }, {immediate: true})
+
+/** 当前表单“模型连接”字段的只读快照，供配置档案栏展示与另存。 */
+const modelSnapshot = computed<ModelProfile>(() => ({
+  profileName: `${form.modelProvider} · ${form.modelName}`,
+  modelProvider: form.modelProvider,
+  modelEndpoint: form.modelEndpoint,
+  modelRequestPath: form.modelRequestPath,
+  modelApiKey: form.modelApiKey,
+  modelName: form.modelName,
+  modelTemperature: form.modelTemperature,
+  modelThinkingEnabled: form.modelThinkingEnabled,
+  modelThinkingProtocol: form.modelThinkingProtocol,
+  modelSeed: form.modelSeed,
+  modelTopP: form.modelTopP,
+  modelTopK: form.modelTopK,
+  modelMaxTokens: form.modelMaxTokens,
+  modelStop: Array.isArray(form.modelStop) ? [...form.modelStop] : [],
+  modelIncludeUsage: form.modelIncludeUsage,
+  modelResponseFormat: form.modelResponseFormat,
+  modelRetryEnabled: form.modelRetryEnabled,
+  modelRetryCount: form.modelRetryCount,
+  modelRetryInitialDelayMillis: form.modelRetryInitialDelayMillis,
+}))
+
+/** 把选中的模型配置档案整体应用到“模型连接”字段；正在运行的会话不受影响。 */
+function applyModelProfile(profile: ModelProfile) {
+  if (locked.value) return
+  const {profileName: _profileName, ...configuration} = profile
+  Object.assign(form, configuration)
+  // 档案中的停止序列同样同步到逗号分隔的文本输入框，保持两处显示一致。
+  stopText.value = Array.isArray(form.modelStop) ? form.modelStop.join(', ') : ''
+}
+
+/** 当前表单“向量模型”字段的只读快照，供向量档案栏展示与另存。 */
+const embeddingSnapshot = computed<EmbeddingProfile>(() => ({
+  profileName: form.embeddingModel || '向量模型',
+  embeddingEndpoint: form.embeddingEndpoint,
+  embeddingApiKey: form.embeddingApiKey,
+  embeddingModel: form.embeddingModel,
+  knowledgeSearchMode: form.knowledgeSearchMode,
+}))
+
+/** 把选中的向量档案应用到知识库 Embedding 字段。 */
+function applyEmbeddingProfile(profile: EmbeddingProfile) {
+  if (locked.value) return
+  const {profileName: _profileName, ...configuration} = profile
+  Object.assign(form, configuration)
+}
+
+/** 立即把当前向量配置应用到知识库（不等创建 Agent），用于知识库面板独立调试。 */
+function configureEmbeddingNow() {
+  if (!form.embeddingEndpoint.trim() || !form.embeddingModel.trim()) return
+  emit('configureEmbedding', {...embeddingSnapshot.value})
+}
 </script>
 
 <template>
@@ -170,6 +234,10 @@ watch(() => props.agent, (agent) => {
       <details class="config-group model-config-group" open>
         <summary>模型连接</summary>
         <fieldset :disabled="locked" class="model-fields">
+          <div class="field-block field-span">
+            <ModelProfileBar :disabled="locked" :current="modelSnapshot" :current-embedding="embeddingSnapshot"
+                             @apply="applyModelProfile" @apply-embedding="applyEmbeddingProfile"/>
+          </div>
           <div class="field-block">
             <ConfigFieldLabel for-id="model-provider" text="服务商" help="OpenAI-compatible 服务商标识，例如 deepseek 或 openai。切换服务商时会影响请求地址、鉴权方式和可观测性中的 provider；留空时继承服务端默认配置。"/>
             <input id="model-provider" v-model.trim="form.modelProvider" required maxlength="80" placeholder="deepseek"/>
@@ -268,6 +336,47 @@ watch(() => props.agent, (agent) => {
           </div>
           <div class="field-block field-span model-help">
             <span>配置会保存在当前浏览器 localStorage，并在创建 Agent 时发送到后端内存；后端不会回显 API Key。</span>
+          </div>
+        </fieldset>
+      </details>
+      <details class="config-group embedding-config-group">
+        <summary>向量模型（Embedding · RAG 知识库）</summary>
+        <fieldset :disabled="locked" class="model-fields">
+          <div class="field-block field-span">
+            <ConfigFieldLabel for-id="embedding-endpoint" text="服务地址" help="OpenAI 兼容 Embedding 服务的根地址（含 /v1），例如本地网关 http://127.0.0.1:18888/v1 或 Ollama http://localhost:11434/v1。知识库切片向量化与检索都走该地址的 /embeddings 接口。"/>
+            <input id="embedding-endpoint" v-model.trim="form.embeddingEndpoint" type="url" maxlength="2048"
+                   placeholder="http://127.0.0.1:18888/v1"/>
+          </div>
+          <div class="field-block">
+            <ConfigFieldLabel for-id="embedding-model" text="向量模型" help="Embedding 模型名，例如 bge-m3（1024 维，多语言）。维度由后端首次调用自动探测；切换模型需要对知识库重建。"/>
+            <input id="embedding-model" v-model.trim="form.embeddingModel" maxlength="200" placeholder="bge-m3"/>
+          </div>
+          <div class="field-block api-key-field">
+            <ConfigFieldLabel for-id="embedding-api-key" text="API Key" help="Embedding 服务密钥；本地 Ollama / 网关免鉴权时可留空。只随请求发送到后端内存，不会回显。"/>
+            <div class="secret-input">
+              <input id="embedding-api-key" v-model.trim="form.embeddingApiKey" :type="showEmbeddingKey ? 'text' : 'password'"
+                     autocomplete="off" maxlength="4096" placeholder="可选"/>
+              <button type="button" :aria-label="showEmbeddingKey ? '隐藏向量 API Key' : '显示向量 API Key'"
+                      :title="showEmbeddingKey ? '隐藏向量 API Key' : '显示向量 API Key'" @click="showEmbeddingKey = !showEmbeddingKey">
+                <IconEyeOff v-if="showEmbeddingKey" :size="17"/>
+                <IconEye v-else :size="17"/>
+              </button>
+            </div>
+          </div>
+          <div class="field-block">
+            <ConfigFieldLabel for-id="knowledge-search-mode" text="检索模式" help="HYBRID 为向量 ANN + BM25 混合召回（推荐）；VECTOR_ONLY 纯语义；KEYWORD_ONLY 纯关键词，无需 Embedding 服务即可使用知识库。"/>
+            <select id="knowledge-search-mode" v-model="form.knowledgeSearchMode">
+              <option value="HYBRID">混合检索（推荐）</option>
+              <option value="VECTOR_ONLY">纯向量</option>
+              <option value="KEYWORD_ONLY">纯关键词</option>
+            </select>
+          </div>
+          <div class="field-block field-span">
+            <button class="secondary-button full-width" type="button" :disabled="locked || !form.embeddingEndpoint.trim() || !form.embeddingModel.trim()"
+                    @click="configureEmbeddingNow">
+              <IconDatabase :size="17"/>
+              应用到知识库
+            </button>
           </div>
         </fieldset>
       </details>
