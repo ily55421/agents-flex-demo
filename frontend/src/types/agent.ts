@@ -290,6 +290,8 @@ export interface AgentDefinition extends Omit<CreateAgentPayload, 'modelApiKey'>
   tools: string[]
   approvalPolicy: string
   createdAt: number
+  // runnable=false 表示该 Agent 只存在于 DuckDB 归档中（服务重启后 Runner 未重建），需重新创建才能对话。
+  runnable?: boolean
 }
 
 export interface CreateRunPayload {

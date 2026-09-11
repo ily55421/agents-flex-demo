@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import {computed, reactive, ref, watch} from 'vue'
-import {IconAdjustmentsHorizontal, IconCheck, IconDatabase, IconEye, IconEyeOff, IconRefresh, IconRobot, IconSettings} from '@tabler/icons-vue'
+import {IconAdjustmentsHorizontal, IconCheck, IconRefresh, IconRobot, IconSettings} from '@tabler/icons-vue'
 import type {AgentDefinition, CreateAgentPayload, EmbeddingProfile, ModelProfile} from '@/types/agent'
-import ConfigHelpIcon from '@/components/ConfigHelpIcon.vue'
 import ConfigFieldLabel from '@/components/ConfigFieldLabel.vue'
-import ModelProfileBar from '@/components/ModelProfileBar.vue'
+import ConfigHelpIcon from '@/components/ConfigHelpIcon.vue'
+import ModelConfigDialog from '@/components/ModelConfigDialog.vue'
 
 const props = defineProps<{
   busy: boolean
@@ -105,8 +105,7 @@ function readSavedConfiguration(): Partial<CreateAgentPayload> {
 
 const form = reactive<CreateAgentPayload>({...defaults, ...readSavedConfiguration()})
 const editing = ref(true)
-const showApiKey = ref(false)
-const showEmbeddingKey = ref(false)
+const dialogOpen = ref(false)
 const stopText = ref(Array.isArray(form.modelStop) ? form.modelStop.join(', ') : '')
 if (!Array.isArray(form.modelStop)) form.modelStop = []
 /** Agent 创建成功或 Run 运行时锁定字段，确保正在执行的配置不会被界面误改。 */
@@ -161,7 +160,7 @@ watch(() => props.agent, (agent) => {
   editing.value = false
 }, {immediate: true})
 
-/** 当前表单“模型连接”字段的只读快照，供配置档案栏展示与另存。 */
+/** 当前表单“模型连接”字段的只读快照，供模型配置弹窗初始化与编辑。 */
 const modelSnapshot = computed<ModelProfile>(() => ({
   profileName: `${form.modelProvider} · ${form.modelName}`,
   modelProvider: form.modelProvider,
@@ -184,16 +183,7 @@ const modelSnapshot = computed<ModelProfile>(() => ({
   modelRetryInitialDelayMillis: form.modelRetryInitialDelayMillis,
 }))
 
-/** 把选中的模型配置档案整体应用到“模型连接”字段；正在运行的会话不受影响。 */
-function applyModelProfile(profile: ModelProfile) {
-  if (locked.value) return
-  const {profileName: _profileName, ...configuration} = profile
-  Object.assign(form, configuration)
-  // 档案中的停止序列同样同步到逗号分隔的文本输入框，保持两处显示一致。
-  stopText.value = Array.isArray(form.modelStop) ? form.modelStop.join(', ') : ''
-}
-
-/** 当前表单“向量模型”字段的只读快照，供向量档案栏展示与另存。 */
+/** 当前表单“向量模型”字段的只读快照，供模型配置弹窗初始化与编辑。 */
 const embeddingSnapshot = computed<EmbeddingProfile>(() => ({
   profileName: form.embeddingModel || '向量模型',
   embeddingEndpoint: form.embeddingEndpoint,
@@ -202,17 +192,21 @@ const embeddingSnapshot = computed<EmbeddingProfile>(() => ({
   knowledgeSearchMode: form.knowledgeSearchMode,
 }))
 
-/** 把选中的向量档案应用到知识库 Embedding 字段。 */
-function applyEmbeddingProfile(profile: EmbeddingProfile) {
-  if (locked.value) return
-  const {profileName: _profileName, ...configuration} = profile
-  Object.assign(form, configuration)
-}
+/** 模型配置摘要：左栏一行展示当前生效的聊天模型与向量模型。 */
+const modelSummary = computed(() => {
+  const chat = `${form.modelProvider} / ${form.modelName}`
+  const embedding = form.embeddingEndpoint ? `${form.embeddingModel} @ ${form.embeddingEndpoint}` : '未配置'
+  return {chat, embedding}
+})
 
-/** 立即把当前向量配置应用到知识库（不等创建 Agent），用于知识库面板独立调试。 */
-function configureEmbeddingNow() {
-  if (!form.embeddingEndpoint.trim() || !form.embeddingModel.trim()) return
-  emit('configureEmbedding', {...embeddingSnapshot.value})
+/** 弹窗“应用配置”：把聊天模型与向量模型字段写回表单（localStorage 自动持久化）。 */
+function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
+  if (locked.value) return
+  const {profileName: _chatName, ...chatFields} = model
+  const {profileName: _embedName, ...embedFields} = embedding
+  Object.assign(form, chatFields, embedFields)
+  stopText.value = Array.isArray(form.modelStop) ? form.modelStop.join(', ') : ''
+  dialogOpen.value = false
 }
 </script>
 
@@ -231,155 +225,20 @@ function configureEmbeddingNow() {
     </div>
 
     <form class="composer-form agent-form" @submit.prevent="submit">
-      <details class="config-group model-config-group" open>
-        <summary>模型连接</summary>
-        <fieldset :disabled="locked" class="model-fields">
-          <div class="field-block field-span">
-            <ModelProfileBar :disabled="locked" :current="modelSnapshot" :current-embedding="embeddingSnapshot"
-                             @apply="applyModelProfile" @apply-embedding="applyEmbeddingProfile"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-provider" text="服务商" help="OpenAI-compatible 服务商标识，例如 deepseek 或 openai。切换服务商时会影响请求地址、鉴权方式和可观测性中的 provider；留空时继承服务端默认配置。"/>
-            <input id="model-provider" v-model.trim="form.modelProvider" required maxlength="80" placeholder="deepseek"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-name" text="模型" help="供应商侧的模型 ID，例如 deepseek-chat。用于主对话和上下文压缩请求；需要切换能力、上下文窗口或成本档位时修改，留空时继承服务端默认模型。"/>
-            <input id="model-name" v-model.trim="form.modelName" required maxlength="200" placeholder="deepseek-chat"/>
-          </div>
-          <div class="field-block field-span">
-            <ConfigFieldLabel for-id="model-endpoint" text="API 地址" help="模型服务根地址，例如 https://api.deepseek.com。接入官方服务、代理网关或本地 OpenAI-compatible 服务时配置，留空时继承服务端默认地址。"/>
-            <input id="model-endpoint" v-model.trim="form.modelEndpoint" type="url" required maxlength="2048"
-                   placeholder="https://api.deepseek.com"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-path" text="请求路径" help="相对于 API 地址的 Chat Completions 请求路径。供应商使用非标准路径或企业网关改写路径时配置，通常保持 /chat/completions 即可。"/>
-            <input id="model-path" v-model.trim="form.modelRequestPath" required maxlength="512"
-                   placeholder="/chat/completions"/>
-          </div>
-          <div class="field-block api-key-field">
-            <ConfigFieldLabel for-id="model-api-key" text="API Key" help="调用真实模型服务的密钥。会随创建 Agent 请求发送到后端，后端只在运行内存中使用，不会回显到 Agent 详情；留空时尝试使用服务端环境变量。"/>
-            <div class="secret-input">
-              <input id="model-api-key" v-model.trim="form.modelApiKey" :type="showApiKey ? 'text' : 'password'"
-                     autocomplete="off" maxlength="4096" placeholder="输入 API Key；留空使用环境变量"/>
-              <button type="button" :aria-label="showApiKey ? '隐藏 API Key' : '显示 API Key'"
-                      :title="showApiKey ? '隐藏 API Key' : '显示 API Key'" @click="showApiKey = !showApiKey">
-                <IconEyeOff v-if="showApiKey" :size="17"/>
-                <IconEye v-else :size="17"/>
-              </button>
-            </div>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-temperature" text="温度" help="控制模型输出的随机性。事实研究和结构化抽取通常使用较低值，创意回答可适当提高；范围为 0 到 2。"/>
-            <input id="model-temperature" v-model.number="form.modelTemperature" type="number" min="0" max="2"
-                   step="0.1" required/>
-          </div>
-          <label class="checkbox-field field-span" for="model-thinking">
-            <input id="model-thinking" v-model="form.modelThinkingEnabled" type="checkbox"/>
-            <span>启用模型思考模式</span>
-            <ConfigHelpIcon label="启用模型思考模式" help="请求支持 reasoning 内容的模型启用思考模式；不支持的供应商可能忽略或拒绝此参数。"/>
-          </label>
-          <div v-if="form.modelThinkingEnabled" class="field-block field-span">
-            <ConfigFieldLabel for-id="thinking-protocol" text="思考协议" help="模型思考内容的供应商协议名称，用于正确解析和保留 reasoning 内容。仅在启用思考且供应商要求特定协议时修改，通常使用服务端默认值。"/>
-            <input id="thinking-protocol" v-model.trim="form.modelThinkingProtocol" required maxlength="80"
-                   placeholder="none"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-seed" text="随机种子" help="供应商支持时用于提高多次请求结果的可复现性，适合回归测试和参数对比。它不能保证输出完全一致，留空表示不发送 seed。"/>
-            <input id="model-seed" v-model.trim="form.modelSeed" maxlength="200" placeholder="可选"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-top-p" text="Top P" help="核采样阈值，只让累计概率位于该范围内的候选 Token 参与生成。用于调节输出多样性；留空时使用供应商默认值。"/>
-            <input id="model-top-p" v-model.number="form.modelTopP" type="number" min="0" max="1" step="0.01"
-                   placeholder="可选"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-top-k" text="Top K" help="每一步生成只保留概率最高的 K 个 Token。仅对支持该参数的供应商生效，适合进一步限制输出发散程度；留空时不发送该参数。"/>
-            <input id="model-top-k" v-model.number="form.modelTopK" type="number" min="1" max="1000000"
-                   placeholder="可选"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-max-tokens" text="单次最大输出 Token" help="限制一次模型响应最多生成的 Token 数，控制单次回答长度和费用。它不同于整轮 Agent 的输出预算，留空时使用供应商默认上限。"/>
-            <input id="model-max-tokens" v-model.number="form.modelMaxTokens" type="number" min="1" max="1000000"
-                   placeholder="可选"/>
-          </div>
-          <div class="field-block field-span">
-            <ConfigFieldLabel for-id="model-stop" text="停止序列" help="模型生成命中任意字符串后停止。适合固定格式或协议边界；最多 20 项，每项不超过 200 字符，使用逗号分隔，留空表示不设置。"/>
-            <input id="model-stop" v-model.trim="stopText" maxlength="4019"
-                   placeholder="可选，最多 20 项且每项不超过 200 字符，使用逗号分隔"/>
-          </div>
-          <label class="checkbox-field field-span" for="model-include-usage">
-            <input id="model-include-usage" v-model="form.modelIncludeUsage" type="checkbox"/>
-            <span>流式响应返回 Usage 统计</span>
-            <ConfigHelpIcon label="流式响应返回 Usage 统计" help="开启后可在统计、预算和 Trace 中展示更准确的输入与输出 Token；关闭后由服务端默认值决定。"/>
-          </label>
-          <label class="checkbox-field field-span" for="model-retry-enabled">
-            <input id="model-retry-enabled" v-model="form.modelRetryEnabled" type="checkbox"/>
-            <span>启用模型 HTTP 请求重试</span>
-            <ConfigHelpIcon label="启用模型 HTTP 请求重试" help="只重试模型 HTTP 请求，不会重新推进整个 Agent Turn；适合应对限流和临时网络错误。"/>
-          </label>
-          <div v-if="form.modelRetryEnabled" class="field-block">
-            <ConfigFieldLabel for-id="model-retry-count" text="模型请求重试次数" help="模型 HTTP 请求失败后追加的最大重试次数，仅在启用模型请求重试时生效。用于应对限流、临时网络错误；0 表示失败后不重试。"/>
-            <input id="model-retry-count" v-model.number="form.modelRetryCount" type="number"
-                   min="0" max="20" step="1" required/>
-          </div>
-          <div v-if="form.modelRetryEnabled" class="field-block">
-            <ConfigFieldLabel for-id="model-retry-delay" text="模型请求重试间隔（ms）" help="模型 HTTP 请求第一次重试前的等待毫秒数，用于给限流或瞬时故障留出恢复时间。0 表示立即重试。"/>
-            <input id="model-retry-delay" v-model.number="form.modelRetryInitialDelayMillis" type="number"
-                   min="0" max="300000" step="1" required/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="model-response-format" text="响应格式" help="主对话的响应约束。模型默认适合普通文本，JSON Object 适合需要结构化主回答的场景；逐消息压缩会独立使用 JSON 数组协议。"/>
-            <select id="model-response-format" v-model="form.modelResponseFormat">
-              <option value="NONE">模型默认</option>
-              <option value="JSON_OBJECT">JSON Object</option>
-            </select>
-          </div>
-          <div class="field-block field-span model-help">
-            <span>配置会保存在当前浏览器 localStorage，并在创建 Agent 时发送到后端内存；后端不会回显 API Key。</span>
-          </div>
-        </fieldset>
-      </details>
-      <details class="config-group embedding-config-group">
-        <summary>向量模型（Embedding · RAG 知识库）</summary>
-        <fieldset :disabled="locked" class="model-fields">
-          <div class="field-block field-span">
-            <ConfigFieldLabel for-id="embedding-endpoint" text="服务地址" help="OpenAI 兼容 Embedding 服务的根地址（含 /v1），例如本地网关 http://127.0.0.1:18888/v1 或 Ollama http://localhost:11434/v1。知识库切片向量化与检索都走该地址的 /embeddings 接口。"/>
-            <input id="embedding-endpoint" v-model.trim="form.embeddingEndpoint" type="url" maxlength="2048"
-                   placeholder="http://127.0.0.1:18888/v1"/>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="embedding-model" text="向量模型" help="Embedding 模型名，例如 bge-m3（1024 维，多语言）。维度由后端首次调用自动探测；切换模型需要对知识库重建。"/>
-            <input id="embedding-model" v-model.trim="form.embeddingModel" maxlength="200" placeholder="bge-m3"/>
-          </div>
-          <div class="field-block api-key-field">
-            <ConfigFieldLabel for-id="embedding-api-key" text="API Key" help="Embedding 服务密钥；本地 Ollama / 网关免鉴权时可留空。只随请求发送到后端内存，不会回显。"/>
-            <div class="secret-input">
-              <input id="embedding-api-key" v-model.trim="form.embeddingApiKey" :type="showEmbeddingKey ? 'text' : 'password'"
-                     autocomplete="off" maxlength="4096" placeholder="可选"/>
-              <button type="button" :aria-label="showEmbeddingKey ? '隐藏向量 API Key' : '显示向量 API Key'"
-                      :title="showEmbeddingKey ? '隐藏向量 API Key' : '显示向量 API Key'" @click="showEmbeddingKey = !showEmbeddingKey">
-                <IconEyeOff v-if="showEmbeddingKey" :size="17"/>
-                <IconEye v-else :size="17"/>
-              </button>
-            </div>
-          </div>
-          <div class="field-block">
-            <ConfigFieldLabel for-id="knowledge-search-mode" text="检索模式" help="HYBRID 为向量 ANN + BM25 混合召回（推荐）；VECTOR_ONLY 纯语义；KEYWORD_ONLY 纯关键词，无需 Embedding 服务即可使用知识库。"/>
-            <select id="knowledge-search-mode" v-model="form.knowledgeSearchMode">
-              <option value="HYBRID">混合检索（推荐）</option>
-              <option value="VECTOR_ONLY">纯向量</option>
-              <option value="KEYWORD_ONLY">纯关键词</option>
-            </select>
-          </div>
-          <div class="field-block field-span">
-            <button class="secondary-button full-width" type="button" :disabled="locked || !form.embeddingEndpoint.trim() || !form.embeddingModel.trim()"
-                    @click="configureEmbeddingNow">
-              <IconDatabase :size="17"/>
-              应用到知识库
-            </button>
-          </div>
-        </fieldset>
-      </details>
+      <div class="model-config-card">
+        <div class="model-config-head">
+          <span class="model-config-label"><IconSettings :size="15"/>模型配置</span>
+          <button class="text-button" type="button" :disabled="locked" @click="dialogOpen = true">
+            ⚙ 配置模型
+          </button>
+        </div>
+        <div class="model-config-summary">
+          <span>聊天：<strong>{{ modelSummary.chat }}</strong></span>
+          <span>向量：<strong>{{ modelSummary.embedding }}</strong></span>
+        </div>
+        <p class="model-config-hint">预设快捷填充 + 自由自定义，可另存为个人档案；配置会保存在当前浏览器。</p>
+      </div>
+
       <fieldset :disabled="locked">
         <legend>基本信息</legend>
         <div class="field-block">
@@ -400,7 +259,7 @@ function configureEmbeddingNow() {
         </div>
       </fieldset>
 
-      <details class="config-group" open>
+      <details class="config-group">
         <summary>执行与上下文</summary>
         <fieldset :disabled="locked" class="compact-fields">
           <div class="field-block"><ConfigFieldLabel for-id="max-iterations" text="最大迭代" help="单个 Agent Turn 最多允许调用模型的迭代次数，用于阻止模型与工具之间无限循环。一次模型调用后执行工具再调用模型，通常会消耗新的迭代。"/><input id="max-iterations"
@@ -582,6 +441,10 @@ function configureEmbeddingNow() {
         <IconSettings :size="18"/>
         重新配置 Agent
       </button>
+
+      <ModelConfigDialog :open="dialogOpen" :model="modelSnapshot" :embedding="embeddingSnapshot"
+                         @close="dialogOpen = false" @apply="applyModelDialog"
+                         @configure-embedding="(profile) => emit('configureEmbedding', profile)"/>
     </form>
   </section>
 </template>

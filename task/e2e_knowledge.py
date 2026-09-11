@@ -7,7 +7,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 from playwright.sync_api import sync_playwright
 
-BASE = 'http://localhost:5174'
+BASE = 'http://localhost:5173'
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
@@ -45,28 +45,38 @@ with sync_playwright() as p:
     assert 'UI 端到端验证文档' in hits_text and '混合检索' in hits_text, '检索未命中新文档'
     print('[3] 检索测试: OK（命中含标题与分数）')
 
-    # 4. 向量模型档案下拉存在 bge-m3 预设
-    emb_select = page.locator('#embedding-profile-select')
-    emb_select.select_option(label='BGE-M3（本地网关 18888）')
-    endpoint_value = page.input_value('#embedding-endpoint')
-    model_value = page.input_value('#embedding-model')
-    assert '18888' in endpoint_value, f'向量档案未应用地址: {endpoint_value}'
-    assert model_value == 'bge-m3', f'向量档案未应用模型: {model_value}'
-    print('[4] 向量档案应用: OK ->', endpoint_value, '/', model_value)
-
-    # 5. “应用到知识库”按钮存在（展开向量组；不点击，避免污染签名状态）
-    page.locator('.embedding-config-group summary').click()
+    # 4. 模型配置弹窗中选择向量预设（bge-m3）并应用到表单
+    page.get_by_role('button', name='配置模型').click()
+    page.wait_for_timeout(400)
+    page.get_by_role('tab', name='向量模型').click()
     page.wait_for_timeout(200)
-    apply_btn = page.get_by_role('button', name='应用到知识库')
-    assert apply_btn.count() == 1 and apply_btn.is_enabled(), '应用到知识库按钮不可用'
-    print('[5] 应用到知识库按钮: OK')
+    page.select_option('#emb-preset', label='BGE-M3（本地网关 18888）')
+    endpoint_value = page.input_value('#dl-emb-endpoint')
+    model_value = page.input_value('#dl-emb-model')
+    assert '18888' in endpoint_value, f'向量预设未应用地址: {endpoint_value}'
+    assert model_value == 'bge-m3', f'向量预设未应用模型: {model_value}'
+    print('[4] 向量预设应用: OK ->', endpoint_value, '/', model_value)
 
-    # 6. 聊天档案下拉仍可用
-    chat_select = page.locator('#model-profile-select')
-    chat_select.select_option(label='DeepSeek Reasoner（深度思考）')
-    model_name = page.input_value('#model-name')
-    assert model_name == 'deepseek-reasoner', f'聊天档案未应用: {model_name}'
-    print('[6] 聊天档案应用: OK -> deepseek-reasoner')
+    # 5. “应用配置”按钮可用并关闭弹窗
+    apply_btn = page.get_by_role('button', name='应用配置')
+    assert apply_btn.count() == 1 and apply_btn.is_enabled(), '应用配置按钮不可用'
+    apply_btn.click()
+    page.wait_for_timeout(400)
+    assert page.locator('.model-dialog').count() == 0, '应用后弹窗未关闭'
+    print('[5] 应用配置并关闭弹窗: OK')
+
+    # 6. 聊天模型预设回归：弹窗内切换服务商字段可编辑
+    page.get_by_role('button', name='配置模型').click()
+    page.wait_for_timeout(300)
+    page.get_by_role('tab', name='聊天模型').click()
+    page.wait_for_timeout(200)
+    page.select_option('#chat-preset', label='DeepSeek Reasoner（深度思考）')
+    page.wait_for_timeout(200)
+    model_name = page.input_value('#dl-model')
+    assert model_name == 'deepseek-reasoner', f'聊天预设未应用: {model_name}'
+    page.get_by_role('button', name='取消', exact=True).click()
+    page.wait_for_timeout(300)
+    print('[6] 聊天预设应用: OK -> deepseek-reasoner')
 
     page.screenshot(path='task/e2e-knowledge-panel.png', full_page=False)
     real_errors = [e for e in errors if 'favicon' not in e.lower()]

@@ -126,6 +126,7 @@ pnpm dev
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `POST` | `/api/agent/agents` | 用完整配置构建并注册真实 Agent |
+| `GET` | `/api/agent/agents` | 列出进程内 + DuckDB 归档的 Agent 安全视图（含 `runnable` 标记，不含 API Key） |
 | `POST` | `/api/agent/runs` | 引用已创建的 `agentId` 创建 READY Run |
 | `GET` | `/api/agent/runs` | 列出内存中的 Runs |
 | `GET` | `/api/agent/runs/model` | 获取不含 API Key 的模型配置状态 |
@@ -139,6 +140,23 @@ pnpm dev
 | `POST` | `/api/agent/runs/{runId}/cancel` | 请求取消 |
 | `GET` | `/api/agent/runs/{runId}/events` | 订阅 SSE 原生事件 |
 | `GET` | `/api/agent/runs/{runId}/trace` | 获取 Agents-Flex OpenTelemetry Span、Metrics 与补充生命周期事件 |
+| `GET` | `/api/knowledge/status` | RAG 知识库状态（就绪度、embedding 签名、维度、文档/切片计数） |
+| `GET` | `/api/knowledge/documents` | 知识库文档清单 |
+| `POST` | `/api/knowledge/documents` | 粘贴文本方式入库（切片 + 向量化） |
+| `POST` | `/api/knowledge/documents/upload` | 上传 `.txt` / `.md` 解析入库 |
+| `DELETE` | `/api/knowledge/documents/{docId}` | 删除文档（RogueMemory namespace + 元数据） |
+| `POST` | `/api/knowledge/search` | 检索测试（TopK、分数、生效模式） |
+| `POST` | `/api/knowledge/embedding` | 应用向量模型配置（不必等待创建 Agent） |
+| `POST` | `/api/knowledge/rebuild` | 重建知识库（清空向量与元数据后重新灌入示例） |
+
+## 页面与模型配置
+
+顶部 Tab 切换两个页面，`?view=chat` 可直接定位纯对话页：
+
+- **Agent 工作台**：左侧配置会话、模型与执行策略并创建 Agent；中央对话区展示真实 `ChatMemory` 驱动的流式回答、动态表单、审批与挂起恢复；右侧为原生事件流。
+- **纯对话**：从 `GET /api/agent/agents` 选择已创建智能体直接对话。仅存在于 DuckDB 归档中的历史 Agent 标记为 `runnable=false` 并禁用，因为服务重启后 Runner、ChatMemory 与 API Key 均不重建，需回到工作台重新创建。
+
+**模型配置弹窗**（左栏「⚙ 配置模型」）统一管理聊天模型与向量模型：内置预设可一键快捷填充，全部字段也支持自由自定义（任意 OpenAI-compatible 服务），并可把当前配置另存为个人档案（保存在浏览器 localStorage，可再选中覆盖或删除）。向量模型 Tab 内提供「应用到知识库（立即生效）」，无需先创建 Agent 即可调试 embedding。左栏仅保留模型摘要与基本信息/执行/预算/压缩等参数折叠组。
 
 ## 项目结构
 

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import {computed, onMounted} from 'vue'
+import {computed, onMounted, ref} from 'vue'
 import {storeToRefs} from 'pinia'
-import {IconRefresh} from '@tabler/icons-vue'
+import {IconMessages, IconRefresh, IconSettings} from '@tabler/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
 import ApprovalPanel from '@/components/ApprovalPanel.vue'
 import BudgetPanel from '@/components/BudgetPanel.vue'
 import CapabilityMap from '@/components/CapabilityMap.vue'
+import ChatHome from '@/components/ChatHome.vue'
 import ChatWorkspace from '@/components/ChatWorkspace.vue'
 import CompressionPanel from '@/components/CompressionPanel.vue'
 import DynamicForm from '@/components/DynamicForm.vue'
@@ -22,6 +23,19 @@ import type {CreateAgentPayload, EmbeddingProfile, JsonSchema} from '@/types/age
 
 const store = useAgentRun()
 const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, error, connectionState, sessions} = storeToRefs(store)
+
+/** 顶部页面 Tab：Agent 工作台（默认）/ 纯对话；?view=chat 可直接定位到纯对话页。 */
+const activeTab = ref<'workspace' | 'chat'>(
+    new URL(window.location.href).searchParams.get('view') === 'chat' ? 'chat' : 'workspace',
+)
+
+/** 切换页面时同步 URL 的 view 参数（replaceState 不产生历史记录）。 */
+function switchTab(tab: 'workspace' | 'chat') {
+  activeTab.value = tab
+  const url = new URL(window.location.href)
+  tab === 'chat' ? url.searchParams.set('view', 'chat') : url.searchParams.delete('view')
+  window.history.replaceState({}, '', url)
+}
 
 /** 从普通 USER_INPUT Suspension 提取动态表单 Schema，手工暂停不会误渲染为业务表单。 */
 const formSchema = computed<JsonSchema | null>(() =>
@@ -75,7 +89,16 @@ onMounted(() => {
 <template>
   <div class="app-shell">
     <AppHeader :run="run" :connection-state="connectionState"/>
-    <main id="main-content" class="dashboard-shell">
+    <nav class="page-tabs" aria-label="页面切换">
+      <button type="button" :class="{active: activeTab === 'workspace'}" @click="switchTab('workspace')">
+        <IconSettings :size="16"/>Agent 工作台
+      </button>
+      <button type="button" :class="{active: activeTab === 'chat'}" @click="switchTab('chat')">
+        <IconMessages :size="16"/>纯对话
+      </button>
+    </nav>
+
+    <main v-if="activeTab === 'workspace'" id="main-content" class="dashboard-shell">
       <aside class="left-rail">
         <SessionPanel :sessions="sessions" :current-conversation-id="run?.conversationId ?? null" :busy="busy"
                       @new-session="store.newSession" @open="(runId) => perform(() => store.openRun(runId))"/>
@@ -119,6 +142,11 @@ onMounted(() => {
       </section>
       <aside class="right-rail"><EventStream :events="run?.events ?? []"/></aside>
     </main>
+
+    <main v-else class="chat-shell">
+      <ChatHome @go-to-workspace="switchTab('workspace')"/>
+    </main>
+
     <div v-if="error" class="error-toast" role="alert"><span>{{ error }}</span><button type="button" @click="store.clearError">关闭</button></div>
   </div>
 </template>

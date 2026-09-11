@@ -43,6 +43,8 @@ export const agentApi = {
     /** 使用完整配置在后端构建并注册真实 Agents-Flex Agent。 */
     createAgent: (payload: CreateAgentPayload) =>
         request<AgentDefinition>(AGENT_API_ROOT, '', {method: 'POST', body: JSON.stringify(payload)}),
+    /** 列出当前进程已创建 + DuckDB 归档的全部 Agent 安全视图，供纯对话页选择智能体。 */
+    listAgents: () => request<AgentDefinition[]>(AGENT_API_ROOT, ''),
     /** 使用已创建 Agent 创建 READY Run，返回初始 Snapshot。 */
     create: (payload: CreateRunPayload) =>
         request<AgentRun>(RUN_API_ROOT, '', {method: 'POST', body: JSON.stringify(payload)}),

@@ -46,6 +46,7 @@ import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -331,6 +332,37 @@ public class ShowcaseRuntime {
                 }
             }
         }
+        return values;
+    }
+
+    /**
+     * 枚举当前进程内所有已创建的 Agent 定义视图，并合并 DuckDB 归档的历史 Agent。
+     * 返回视图均不含 API Key，可直接提供给浏览器选择与展示。
+     *
+     * <p>每个视图带 {@code runnable} 标记：只有仍在进程内注册的 Agent 才能直接发起对话；
+     * 仅存在于归档中的历史 Agent 需要重新配置模型并创建（API Key 不持久化）。</p>
+     *
+     * @return 按创建时间倒序的 Agent 安全视图列表
+     */
+    public List<Map<String, Object>> listAgents() {
+        Map<String, Map<String, Object>> byId = new LinkedHashMap<>();
+        for (DemoAgent definition : agents.values()) {
+            Map<String, Object> view = new LinkedHashMap<>(definition.toView());
+            view.put("runnable", true);
+            byId.put(definition.id, view);
+        }
+        if (archive != null) {
+            for (Map<String, Object> archived : archive.loadAgentDefinitions()) {
+                Object agentId = archived.get("agentId");
+                if (!(agentId instanceof String)) continue;
+                Map<String, Object> view = new LinkedHashMap<>(archived);
+                view.put("runnable", agents.containsKey(agentId));
+                byId.putIfAbsent((String) agentId, view);
+            }
+        }
+        List<Map<String, Object>> values = new ArrayList<>(byId.values());
+        values.sort((left, right) -> Long.compare(
+                number(right.get("createdAt")), number(left.get("createdAt"))));
         return values;
     }
 
