@@ -56,7 +56,7 @@ cd /Users/michael/git/agents-flex
 mvn -pl agents-flex-agent -am install -DskipTests
 ```
 
-随后确认 Java 8+、Maven、Node.js 和 pnpm 可用。
+随后确认 Java 8+、Maven、Node.js 和 pnpm 可用。DuckDB（嵌入式单文件数据库，无需独立服务）与 Ehcache（JCache 缓存）由 Maven 自动下载，无需额外安装。
 
 ## 启动
 
@@ -115,7 +115,9 @@ pnpm dev
 - Trace 来自 Agents-Flex 原生 OpenTelemetry Chat/Tool 埋点；Human Approval、Retry、Compression 等框架生命周期没有独立 OTel Span，因此以原生 `AgentEvent` 补充展示，不混充 Span。
 - 手动挂起是协作式的：运行中请求会等当前模型或工具原子 Step 返回，再使用 Agents-Flex 原生 Suspension 保存；表单与审批继续使用框架自身的 Suspension/Resume 生命周期。
 - `maxDurationMillis` 是 Agents-Flex 的墙钟预算，包含表单、审批和手动挂起的人工等待；默认 30 分钟，可在创建 Agent 时调整。
-- Run、事件历史与 OpenTelemetry 导出数据保存在进程内存中，用于可重复演示；服务重启后不会保留。
+- 运行态数据（OTel 导出结果、ChatMemory、SSE 连接）保存在进程内存中，用于可重复演示，服务重启后不再保留。
+- Agent 定义、Run 快照与事件历史会写入 DuckDB 文件数据库（默认 `./data/showcase.duckdb`，可用 `DUCKDB_URL` 覆盖），重启后可在控制台浏览历史 Agent 与 Run；Runner、ChatMemory、SSE 流等运行态对象仍在进程内存，重启后不能继续执行旧 Run。
+- 热读路径使用 Ehcache（JCache）缓存：Agent 定义（10 分钟）、终态 Run 快照（10 分钟）与模型状态（1 分钟）；模型状态在创建 Agent 时主动失效，活跃 Run 快照在每次写入时逐条失效，保证不被缓存掩盖。
 - Token 估算器和金额成本仅用于展示，不代表供应商的实际 tokenizer 与账单；确定性 ChatModel 仅存在于测试链路。
 - 工具函数、审批策略、模型选择器、Middleware、Executor 和重试 Decider 属于进程内 Java 行为，不是可序列化配置；Showcase 使用固定实现。UI 覆盖 Agents-Flex 当前面向 Agent Runtime 的声明式执行、预算、重试、上下文与压缩配置，以及本场景实际使用的文本模型参数。
 
@@ -147,7 +149,9 @@ agents-flex-demo/
 |   |-- api/              REST、SSE 与异常映射
 |   |-- model/            请求模型
 |   |-- runtime/          Runner 控制面、Snapshot 和事件视图
-|   `-- demo/             Agent、工具与压缩策略
+|   |-- demo/             Agent、工具与压缩策略
+|   |-- config/           模型连接与 Ehcache 缓存配置
+|   `-- persistence/      DuckDB 持久化归档
 |-- src/test/             完整 Runtime 生命周期测试
 |-- frontend/
 |   |-- src/api/          REST/SSE 客户端

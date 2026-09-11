@@ -25,6 +25,7 @@ import com.agentsflex.showcase.demo.ResearchAgentFactory;
 import com.agentsflex.showcase.demo.ShowcaseTokenEstimator;
 import com.agentsflex.showcase.observability.InMemorySpanExporter;
 import com.agentsflex.showcase.observability.InMemoryMetricExporter;
+import com.agentsflex.showcase.persistence.RunArchive;
 import com.agentsflex.core.observability.Observability;
 import com.agentsflex.core.observability.ObservabilityAttributeKeys;
 import com.agentsflex.core.observability.SpanProcessingMode;
@@ -35,9 +36,13 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -63,18 +68,51 @@ public class ShowcaseRuntime {
 
     private final ConcurrentMap<String, DemoRun> runs = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, DemoAgent> agents = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, Object>> archivedAgents = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final ResearchAgentFactory agentFactory;
+    private final RunArchive archive;
 
     /**
      * 初始化 Demo 控制面，并在调用方未显式配置时开启 OTel 内容采集。
      * 内容采集用于在 Trace 面板展示模型输出、工具参数和工具结果。
+     * 该构造器仅用于测试直接装配；Spring 容器使用带 RunArchive 的双参构造器。
+     *
+     * @param agentFactory Agent 工厂
      */
     public ShowcaseRuntime(ResearchAgentFactory agentFactory) {
+        this(agentFactory, null);
+    }
+
+    /**
+     * 初始化 Demo 控制面，并注入 DuckDB 持久化归档。
+     * 未配置 API Key 或归档不可用时不会阻断启动；archive 为空时全部持久化调用自动跳过。
+     *
+     * @param agentFactory Agent 工厂
+     * @param archive      DuckDB 归档；测试或降级场景可传 {@code null}
+     */
+    @Autowired
+    public ShowcaseRuntime(ResearchAgentFactory agentFactory, RunArchive archive) {
         this.agentFactory = agentFactory;
+        this.archive = archive;
         if (System.getProperty("agentsflex.otel.capture.content") == null) {
             System.setProperty("agentsflex.otel.capture.content", "true");
+        }
+    }
+
+    /**
+     * 启动时从 DuckDB 恢复历史 Agent 定义视图，供左侧配置面板与归档查询使用。
+     * 归档中的定义不含 API Key，因此只做展示性恢复，不重建可执行 Agent。
+     */
+    @PostConstruct
+    public void restoreArchivedAgents() {
+        if (archive == null) return;
+        for (Map<String, Object> view : archive.loadAgentDefinitions()) {
+            Object agentId = view.get("agentId");
+            if (agentId instanceof String) {
+                archivedAgents.put((String) agentId, view);
+            }
         }
     }
 
@@ -85,6 +123,7 @@ public class ShowcaseRuntime {
      * @param request Agent、预算、重试、上下文和压缩配置
      * @return 不含 API Key 的 Agent 完整配置视图
      */
+    @CacheEvict(cacheNames = "modelStatus", allEntries = true)
     public Map<String, Object> createAgent(CreateAgentRequest request) {
         if (request.getInitialDelayMillis() > request.getMaxDelayMillis()) {
             throw new IllegalArgumentException("最大重试间隔不能小于初始重试间隔");
@@ -96,6 +135,10 @@ public class ShowcaseRuntime {
         request.setModelApiKey(null);
         DemoAgent definition = new DemoAgent(agentId, agent, request, compressionStore);
         agents.put(agentId, definition);
+        if (archive != null) {
+            archive.saveAgentDefinition(agentId, definition.toView(), definition.createdAt);
+            archivedAgents.put(agentId, definition.toView());
+        }
         return definition.toView();
     }
 
@@ -164,7 +207,12 @@ public class ShowcaseRuntime {
         run.runId = turn.getId();
         rootSpan.setAttribute(ObservabilityAttributeKeys.TURN_ID, turn.getId());
         runs.put(turn.getId(), run);
-        return RunViewMapper.map(run, turn);
+        Map<String, Object> view = RunViewMapper.map(run, turn);
+        if (archive != null) {
+            archive.saveRunSnapshot(run.runId, run.conversationId, run.agent.getId(),
+                    turn.getStatus().name(), view);
+        }
+        return view;
     }
 
     /**
@@ -237,7 +285,12 @@ public class ShowcaseRuntime {
         run.runId = turn.getId();
         run.rootSpan.setAttribute(ObservabilityAttributeKeys.TURN_ID, turn.getId());
         runs.put(turn.getId(), run);
-        return RunViewMapper.map(run, turn);
+        Map<String, Object> view = RunViewMapper.map(run, turn);
+        if (archive != null) {
+            archive.saveRunSnapshot(run.runId, run.conversationId, run.agent.getId(),
+                    turn.getStatus().name(), view);
+        }
+        return view;
     }
 
     /**
@@ -247,8 +300,16 @@ public class ShowcaseRuntime {
      * @return 当前 Run 的只读 API 投影
      */
     public Map<String, Object> get(String runId) {
-        DemoRun run = requireRun(runId);
-        return RunViewMapper.map(run, run.runner.restore(runId));
+        DemoRun run = runs.get(runId);
+        if (run != null) {
+            return RunViewMapper.map(run, run.runner.restore(runId));
+        }
+        // 重启后的历史 Run 无法重建 Runner/Memory，直接返回 DuckDB 中的归档视图。
+        if (archive != null) {
+            Map<String, Object> archived = archive.loadRunSnapshot(runId);
+            if (archived != null) return archived;
+        }
+        throw new IllegalArgumentException("Agent run not found: " + runId);
     }
 
     /**
@@ -261,6 +322,15 @@ public class ShowcaseRuntime {
         for (DemoRun run : runs.values()) {
             values.add(RunViewMapper.map(run, run.runner.restore(run.runId)));
         }
+        // 重启后内存中的 Run 已消失，但 DuckDB 归档的终态快照仍然可查。
+        if (archive != null) {
+            for (Map<String, Object> archived : archive.loadRunSnapshots()) {
+                Object runId = archived.get("runId");
+                if (!(runId instanceof String) || !runs.containsKey(runId)) {
+                    values.add(archived);
+                }
+            }
+        }
         return values;
     }
 
@@ -269,6 +339,7 @@ public class ShowcaseRuntime {
      *
      * @return provider、model、endpoint、温度、思考模式和是否已配置
      */
+    @Cacheable(cacheNames = "modelStatus", key = "'current'")
     public Map<String, Object> modelStatus() {
         return agentFactory.modelInfo();
     }
@@ -484,6 +555,10 @@ public class ShowcaseRuntime {
                 scheduler.schedule(() -> advance(run, true), 25, TimeUnit.MILLISECONDS);
             }
             finishTelemetry(run, result);
+            if (archive != null) {
+                archive.saveRunSnapshot(run.runId, run.conversationId, run.agent.getId(),
+                        result.getStatus().name(), RunViewMapper.map(run, result));
+            }
         } catch (RuntimeException error) {
             run.runtimeError = error.getMessage();
         } finally {
@@ -526,7 +601,12 @@ public class ShowcaseRuntime {
             run.compressionStatus = "FAILED";
             run.compressionCompletedAt = event.getOccurredAt();
         }
-        run.publish(new DemoEvent(event));
+        DemoEvent demoEvent = new DemoEvent(event);
+        if (archive != null) {
+            archive.appendEvent(demoEvent.getRunId(), demoEvent.getEventId(), demoEvent.getSequence(),
+                    demoEvent.getType(), demoEvent.getOccurredAt(), demoEvent.getData());
+        }
+        run.publish(demoEvent);
     }
 
     /**

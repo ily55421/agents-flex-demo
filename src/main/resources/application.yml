@@ -28,6 +28,8 @@ agents-flex:
     retry-enabled: ${LLM_RETRY_ENABLED:true}
     retry-count: ${LLM_RETRY_COUNT:2}
     retry-initial-delay-millis: ${LLM_RETRY_INITIAL_DELAY_MILLIS:600}
+  persistence:
+    duckdb-url: ${DUCKDB_URL:jdbc:duckdb:./data/showcase.duckdb}
 
 logging:
   level:
