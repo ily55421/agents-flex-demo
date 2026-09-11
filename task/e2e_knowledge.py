@@ -14,7 +14,7 @@ with sync_playwright() as p:
     page = browser.new_page(viewport={'width': 1680, 'height': 950})
     errors = []
     page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)
-    page.goto(BASE)
+    page.goto(BASE + '/?view=knowledge')
     page.wait_for_load_state('networkidle')
     page.wait_for_timeout(1500)
 
@@ -45,7 +45,9 @@ with sync_playwright() as p:
     assert 'UI 端到端验证文档' in hits_text and '混合检索' in hits_text, '检索未命中新文档'
     print('[3] 检索测试: OK（命中含标题与分数）')
 
-    # 4. 模型配置弹窗中选择向量预设（bge-m3）并应用到表单
+    # 4. 刔回工作台，模型配置弹窗中选择向量预设（bge-m3）并应用到表单
+    page.locator('.page-tabs button').nth(0).click()
+    page.wait_for_timeout(800)
     page.get_by_role('button', name='配置模型').click()
     page.wait_for_timeout(400)
     page.get_by_role('tab', name='向量模型').click()
@@ -65,9 +67,10 @@ with sync_playwright() as p:
     assert page.locator('.model-dialog').count() == 0, '应用后弹窗未关闭'
     print('[5] 应用配置并关闭弹窗: OK')
 
-    # 6. 聊天模型预设回归：弹窗内切换服务商字段可编辑
-    page.get_by_role('button', name='配置模型').click()
-    page.wait_for_timeout(300)
+    # 6. 聊天模型预设回归：弹窗内切换服务商字段可编辑（弹窗已关闭需重开）
+    if page.locator('.model-dialog').count() == 0:
+        page.get_by_role('button', name='配置模型').click()
+        page.wait_for_timeout(300)
     page.get_by_role('tab', name='聊天模型').click()
     page.wait_for_timeout(200)
     page.select_option('#chat-preset', label='DeepSeek Reasoner（深度思考）')

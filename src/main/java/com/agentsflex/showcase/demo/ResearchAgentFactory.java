@@ -188,12 +188,15 @@ public final class ResearchAgentFactory {
 
         // RAG 知识库检索工具：走 RogueMemory 混合检索（向量 ANN + BM25），命中片段带标题、
         // 片段序号与相关度分数返回，模型引用时可标注来源。知识库未配置时返回说明文本。
+        // Agent 可绑定知识库范围（knowledgeNamespace），实现按文档检索。
+        final String knowledgeNamespace = request.getKnowledgeNamespace();
         Tool knowledgeTool = Tool.builder("search_knowledge",
                         "检索本地 RAG 知识库，返回与问题最相关的资料片段（含来源与相关度）")
                 .addParameter(Parameter.builder().name("query").type("string").required(true).build())
                 .function(arguments -> knowledgeService == null
                         ? "知识库服务未启用。"
-                        : knowledgeService.searchForTool(String.valueOf(arguments.get("query"))))
+                        : knowledgeService.searchForTool(String.valueOf(arguments.get("query")),
+                        knowledgeNamespace))
                 .build();
 
         // 按页面选择的 Decider 与 Compressor 组合真实增量压缩，不预置虚假历史。

@@ -282,6 +282,7 @@ export interface CreateAgentPayload {
   embeddingApiKey: string
   embeddingModel: string
   knowledgeSearchMode: KnowledgeSearchMode
+  knowledgeNamespace: string
 }
 
 // AgentDefinition 是后端完成真实 Agents-Flex Builder 校验后返回的安全配置，不包含任何模型密钥字段。

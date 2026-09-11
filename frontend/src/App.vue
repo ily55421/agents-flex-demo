@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {computed, onMounted, ref} from 'vue'
 import {storeToRefs} from 'pinia'
-import {IconMessages, IconRefresh, IconSettings} from '@tabler/icons-vue'
+import {IconDatabase, IconMessages, IconRefresh, IconSettings} from '@tabler/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
 import ApprovalPanel from '@/components/ApprovalPanel.vue'
 import BudgetPanel from '@/components/BudgetPanel.vue'
@@ -27,17 +27,22 @@ const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, 
 /** 知识库面板实例；应用向量配置后主动刷新状态，避免用户看到过期的“未配置”。 */
 const knowledgePanel = ref<{ reload: () => Promise<void> } | null>(null)
 
-/** 顶部页面 Tab：Agent 工作台（默认）/ 纯对话；?view=chat 可直接定位到纯对话页。 */
-const activeTab = ref<'workspace' | 'chat'>(
-    new URL(window.location.href).searchParams.get('view') === 'chat' ? 'chat' : 'workspace',
+/** 顶部页面 Tab：Agent 工作台（默认）/ 知识库 / 纯对话；?view= 可直接定位。 */
+const activeTab = ref<'workspace' | 'knowledge' | 'chat'>(
+    (() => {
+      const view = new URL(window.location.href).searchParams.get('view')
+      return view === 'chat' ? 'chat' : view === 'knowledge' ? 'knowledge' : 'workspace'
+    })(),
 )
 
 /** 切换页面时同步 URL 的 view 参数（replaceState 不产生历史记录）。 */
-function switchTab(tab: 'workspace' | 'chat') {
+function switchTab(tab: 'workspace' | 'knowledge' | 'chat') {
   activeTab.value = tab
   const url = new URL(window.location.href)
-  tab === 'chat' ? url.searchParams.set('view', 'chat') : url.searchParams.delete('view')
+  tab === 'workspace' ? url.searchParams.delete('view') : url.searchParams.set('view', tab)
   window.history.replaceState({}, '', url)
+  // 进入知识库页时刷新状态，保证文档清单与向量状态最新。
+  if (tab === 'knowledge') knowledgePanel.value?.reload().catch(() => undefined)
 }
 
 /** 从普通 USER_INPUT Suspension 提取动态表单 Schema，手工暂停不会误渲染为业务表单。 */
@@ -106,6 +111,9 @@ onMounted(() => {
       <button type="button" :class="{active: activeTab === 'workspace'}" @click="switchTab('workspace')">
         <IconSettings :size="16"/>Agent 工作台
       </button>
+      <button type="button" :class="{active: activeTab === 'knowledge'}" @click="switchTab('knowledge')">
+        <IconDatabase :size="16"/>知识库
+      </button>
       <button type="button" :class="{active: activeTab === 'chat'}" @click="switchTab('chat')">
         <IconMessages :size="16"/>纯对话
       </button>
@@ -118,7 +126,6 @@ onMounted(() => {
         <TaskComposer :busy="busy" :disabled="Boolean(run)" :agent="agent" :show-reset="store.isTerminal"
                       @create="createAgent" @reset="store.reset" @configure-embedding="configureEmbedding"
                       @apply-model="applyModel"/>
-        <KnowledgePanel ref="knowledgePanel"/>
         <RunControls v-if="run" :run="run" :busy="busy" @start="perform(store.start)"
                      @suspend="perform(store.suspend)" @resume="perform(store.resume)"
                      @cancel="perform(store.cancel)" @refresh="perform(store.refresh)" @reset="store.reset"/>
@@ -155,6 +162,10 @@ onMounted(() => {
         </ChatWorkspace>
       </section>
       <aside class="right-rail"><EventStream :events="run?.events ?? []"/></aside>
+    </main>
+
+    <main v-else-if="activeTab === 'knowledge'" class="knowledge-shell">
+      <KnowledgePanel ref="knowledgePanel"/>
     </main>
 
     <main v-else class="chat-shell">

@@ -11,8 +11,8 @@ import EventStream from '@/components/EventStream.vue'
 import RetryPanel from '@/components/RetryPanel.vue'
 import RunResult from '@/components/RunResult.vue'
 import {useAgentRun} from '@/composables/useAgentRun'
-import {agentApi} from '@/api/agent'
-import type {AgentDefinition, JsonSchema} from '@/types/agent'
+import {agentApi, knowledgeApi} from '@/api/agent'
+import type {AgentDefinition, JsonSchema, KnowledgeDocument} from '@/types/agent'
 
 const emit = defineEmits<{ goToWorkspace: [] }>()
 const store = useAgentRun()
@@ -22,6 +22,7 @@ const agents = ref<AgentDefinition[]>([])
 const selectedAgentId = ref('')
 const loading = ref(false)
 const loadError = ref<string | null>(null)
+const knowledgeDocs = ref<KnowledgeDocument[]>([])
 
 /** 当前选中的智能体定义；会话列表打开历史 Run 时以后端 Snapshot 中的 agent 为准。 */
 const selectedAgent = computed<AgentDefinition | null>(() =>
@@ -40,12 +41,17 @@ const formSchema = computed<JsonSchema | null>(() =>
 const runnableAgents = computed(() => agents.value.filter((item) => item.runnable !== false))
 const archivedAgents = computed(() => agents.value.filter((item) => item.runnable === false))
 
-/** 加载智能体列表（当前进程 + DuckDB 归档），失败时展示原因。 */
+/** 加载智能体与知识库文档（后者用于展示智能体绑定的检索范围标题）。 */
 async function loadAgents() {
   loading.value = true
   loadError.value = null
   try {
-    agents.value = await agentApi.listAgents()
+    const [list, docs] = await Promise.all([
+      agentApi.listAgents(),
+      knowledgeApi.documents().catch(() => [] as KnowledgeDocument[]),
+    ])
+    agents.value = list
+    knowledgeDocs.value = docs
     if (selectedAgentId.value && !agents.value.some((item) => item.agentId === selectedAgentId.value)) {
       selectedAgentId.value = ''
     }
@@ -76,6 +82,11 @@ async function send(message: string) {
   } catch {
     // Store 已记录后端准确错误。
   }
+}
+
+/** 把绑定的 docId 翻译为文档标题；加载失败时原样显示 ID。 */
+function knowledgeTitle(docId: string): string {
+  return knowledgeDocs.value.find((item) => item.docId === docId)?.title ?? docId
 }
 
 /** 执行交互面板命令。 */
@@ -138,6 +149,13 @@ onMounted(() => {
       <div v-if="selectedAgent" class="agent-brief">
         <span class="agent-brief-name">{{ selectedAgent.name }}</span>
         <span class="agent-brief-model">{{ selectedAgent.modelProvider }} · {{ selectedAgent.modelName }}</span>
+        <span v-if="selectedAgent.knowledgeNamespace && selectedAgent.knowledgeNamespace !== 'all'"
+              class="agent-brief-kb" title="该智能体的 search_knowledge 只检索绑定的文档">
+          知识库：{{ knowledgeTitle(selectedAgent.knowledgeNamespace) }}
+        </span>
+        <span v-else-if="selectedAgent.tools?.includes('search_knowledge')" class="agent-brief-kb">
+          知识库：全部文档
+        </span>
         <span v-if="selectedAgent.description" class="agent-brief-desc">{{ selectedAgent.description }}</span>
       </div>
       <div class="chat-home-main">
@@ -292,6 +310,15 @@ onMounted(() => {
 
 .agent-brief-model {
   color: #047857;
+}
+
+.agent-brief-kb {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11.5px;
 }
 
 .agent-brief-desc {

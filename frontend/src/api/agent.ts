@@ -109,11 +109,11 @@ export const knowledgeApi = {
     /** 删除文档（RogueMemory namespace + DuckDB 元数据）。 */
     deleteDocument: (docId: string) =>
         request<{ deleted: boolean; docId: string }>(KNOWLEDGE_API_ROOT, `/documents/${docId}`, {method: 'DELETE'}),
-    /** 检索测试：返回 TopK 命中片段与生效模式。 */
-    search: (query: string, topK: number) =>
-        request<{ query: string; hits: KnowledgeHit[] }>(KNOWLEDGE_API_ROOT, '/search', {
+    /** 检索测试：返回 TopK 命中片段与生效模式；namespace 可限定单文档。 */
+    search: (query: string, topK: number, namespace?: string) =>
+        request<{ query: string; namespace: string; hits: KnowledgeHit[] }>(KNOWLEDGE_API_ROOT, '/search', {
             method: 'POST',
-            body: JSON.stringify({query, topK}),
+            body: JSON.stringify({query, topK, namespace}),
         }),
     /** 应用向量模型档案到知识库。 */
     configureEmbedding: (payload: {

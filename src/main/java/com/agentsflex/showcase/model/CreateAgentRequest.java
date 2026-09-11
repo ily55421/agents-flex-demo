@@ -607,6 +607,27 @@ public class CreateAgentRequest {
     private String knowledgeSearchMode;
 
     /**
+     * Agent 绑定的知识库文档范围：docId 限定单文档；{@code all} 或留空检索全库。
+     * 用于在对话页按需选择检索范围（例如只查某个变电站）。
+     */
+    @Size(max = 80)
+    private String knowledgeNamespace;
+
+    /**
+     * @return 知识库检索范围 namespace
+     */
+    public String getKnowledgeNamespace() {
+        return knowledgeNamespace;
+    }
+
+    /**
+     * @param value 知识库检索范围 namespace
+     */
+    public void setKnowledgeNamespace(String value) {
+        this.knowledgeNamespace = value;
+    }
+
+    /**
      * @return 知识库 embedding 服务根地址
      */
     public String getEmbeddingEndpoint() {

@@ -17,8 +17,12 @@ const fileInput = ref<HTMLInputElement | null>(null)
 
 const searchQuery = ref('')
 const searchTopK = ref(5)
+const searchNamespace = ref('all')
 const searchHits = ref<KnowledgeHit[]>([])
 const searched = ref(false)
+const multiFileInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const importProgress = ref('')
 
 const sourceLabels: Record<string, string> = {MANUAL: '文本录入', FILE: '文件上传', BUILTIN: '内置示例'}
 const modeLabels: Record<string, string> = {HYBRID: '混合检索', VECTOR_ONLY: '纯向量', KEYWORD_ONLY: '纯关键词'}
@@ -91,10 +95,45 @@ function rebuild() {
 function testSearch() {
   if (!searchQuery.value.trim()) return
   void run(async () => {
-    const result = await knowledgeApi.search(searchQuery.value, searchTopK.value)
+    const result = await knowledgeApi.search(searchQuery.value, searchTopK.value, searchNamespace.value)
     searchHits.value = result.hits
     searched.value = true
   }).catch(() => undefined)
+}
+
+/** 批量导入：逐个上传所选文件（.md/.txt/.jsonl），显示进度；失败不中断后续文件。 */
+async function importFiles(files: FileList | null) {
+  if (!files || !files.length) return
+  importing.value = true
+  busy.value = true
+  error.value = null
+  notice.value = null
+  let ok = 0
+  let failed = 0
+  const failures: string[] = []
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index]
+    importProgress.value = `正在导入 (${index + 1}/${files.length})：${file.name}`
+    try {
+      await knowledgeApi.uploadDocument(file)
+      ok++
+    } catch (cause) {
+      failed++
+      failures.push(`${file.name}: ${cause instanceof Error ? cause.message : '失败'}`)
+    }
+    await Promise.all([loadStatus(), loadDocuments()])
+  }
+  importing.value = false
+  busy.value = false
+  importProgress.value = ''
+  notice.value = `批量导入完成：成功 ${ok} 个${failed ? `，失败 ${failed} 个（${failures.join('；')}）` : ''}`
+}
+
+function onMultiFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = input.files
+  void importFiles(files).catch(() => undefined)
+  input.value = ''
 }
 
 function formatTime(millis: number) {
@@ -144,11 +183,17 @@ onMounted(() => {
           <IconUpload :size="16"/>文本入库
         </button>
         <button class="secondary-button" type="button" :disabled="busy" @click="fileInput?.click()">
-          <IconFileUpload :size="16"/>上传 .txt / .md
+          <IconFileUpload :size="16"/>上传单文件
         </button>
-        <input ref="fileInput" type="file" accept=".txt,.md,.markdown,text/markdown,text/plain"
+        <button class="secondary-button" type="button" :disabled="busy || importing" @click="multiFileInput?.click()">
+          <IconFileUpload :size="16"/>批量导入（.md/.txt/.jsonl）
+        </button>
+        <input ref="fileInput" type="file" accept=".txt,.md,.markdown,.jsonl,text/markdown,text/plain"
                class="knowledge-file-input" aria-label="上传知识文件" @change="onFileChange"/>
+        <input ref="multiFileInput" type="file" accept=".txt,.md,.markdown,.jsonl,text/markdown,text/plain"
+               class="knowledge-file-input" multiple aria-label="批量导入知识文件" @change="onMultiFileChange"/>
       </div>
+      <p v-if="importProgress" class="knowledge-import-progress">{{ importProgress }}</p>
     </details>
 
     <div v-if="error" class="knowledge-error" role="alert">{{ error }}</div>
@@ -156,8 +201,12 @@ onMounted(() => {
 
     <div class="knowledge-search">
       <div class="field-block">
-        <ConfigFieldLabel for-id="kb-query" text="检索测试" help="直接查询 RogueMemory 混合索引（向量 ANN + BM25），验证切片与向量化效果；Agent 的 search_knowledge 工具走同一链路。"/>
+        <ConfigFieldLabel for-id="kb-query" text="检索测试" help="直接查询 RogueMemory 混合索引（向量 ANN + BM25）；可限定单个文档范围，Agent 的 search_knowledge 工具走同一链路。"/>
         <div class="knowledge-search-row">
+          <select v-model="searchNamespace" class="knowledge-namespace" aria-label="检索范围">
+            <option value="all">全部文档</option>
+            <option v-for="doc in documents" :key="doc.docId" :value="doc.docId">{{ doc.title }}</option>
+          </select>
           <input id="kb-query" v-model.trim="searchQuery" maxlength="500" placeholder="例如：混合检索怎么做？"
                  @keydown.enter.prevent="testSearch"/>
           <input v-model.number="searchTopK" class="knowledge-topk" type="number" min="1" max="20" aria-label="TopK"/>
@@ -292,6 +341,17 @@ onMounted(() => {
   border: 1px solid #a7f3d0;
   border-radius: 8px;
   padding: 6px 10px;
+}
+
+.knowledge-import-progress {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #047857;
+}
+
+.knowledge-namespace {
+  max-width: 180px;
+  flex: none;
 }
 
 .knowledge-search-row {

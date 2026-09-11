@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import {computed, reactive, ref, watch} from 'vue'
+import {computed, onMounted, reactive, ref, watch} from 'vue'
 import {IconAdjustmentsHorizontal, IconCheck, IconRefresh, IconRobot, IconSettings} from '@tabler/icons-vue'
-import type {AgentDefinition, CreateAgentPayload, EmbeddingProfile, ModelProfile} from '@/types/agent'
+import type {AgentDefinition, CreateAgentPayload, EmbeddingProfile, KnowledgeDocument, ModelProfile} from '@/types/agent'
 import ConfigFieldLabel from '@/components/ConfigFieldLabel.vue'
 import ConfigHelpIcon from '@/components/ConfigHelpIcon.vue'
 import ModelConfigDialog from '@/components/ModelConfigDialog.vue'
+import {knowledgeApi} from '@/api/agent'
 
 const props = defineProps<{
   busy: boolean
@@ -92,6 +93,7 @@ const defaults: CreateAgentPayload = {
   embeddingApiKey: '',
   embeddingModel: 'bge-m3',
   knowledgeSearchMode: 'HYBRID',
+  knowledgeNamespace: 'all',
 }
 
 /** 从浏览器恢复上次保存的完整配置；损坏或旧版本数据自动回退到默认值。 */
@@ -207,6 +209,22 @@ const modelSummary = computed(() => {
   return {chat, embedding}
 })
 
+/** 知识库文档清单：供“知识库范围”下拉选择检索范围。 */
+const knowledgeDocs = ref<KnowledgeDocument[]>([])
+
+/** 刷新知识库文档清单，用于范围选择；失败时静默保留空列表。 */
+async function loadKnowledgeDocs() {
+  try {
+    knowledgeDocs.value = await knowledgeApi.documents()
+  } catch {
+    knowledgeDocs.value = []
+  }
+}
+
+onMounted(() => {
+  void loadKnowledgeDocs()
+})
+
 /** 弹窗“应用配置”：写回表单、持久化到浏览器，并同步到后端使模型状态立即生效。 */
 function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
   if (dialogLocked.value) return
@@ -272,6 +290,24 @@ function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
           <textarea id="agent-instructions" v-model.trim="form.instructions" rows="7" required maxlength="8000"/>
         </div>
       </fieldset>
+
+      <details class="config-group" open>
+        <summary>知识库范围</summary>
+        <fieldset :disabled="locked" class="compact-fields">
+          <div class="field-block field-span">
+            <ConfigFieldLabel for-id="knowledge-namespace" text="检索范围" help="限定 Agent 的 search_knowledge 工具只检索哪个文档；选「全部文档」检索整个知识库。导入新知识后可回到这里切换范围。"/>
+            <select id="knowledge-namespace" v-model="form.knowledgeNamespace">
+              <option value="all">全部文档</option>
+              <option v-for="doc in knowledgeDocs" :key="doc.docId" :value="doc.docId">
+                {{ doc.title }}（{{ doc.chunkCount }} 片）
+              </option>
+            </select>
+          </div>
+          <div class="field-block field-span knowledge-range-hint">
+            <span>还没有需要的知识？前往顶部「知识库」页批量导入后回到这里选择。</span>
+          </div>
+        </fieldset>
+      </details>
 
       <details class="config-group">
         <summary>执行与上下文</summary>

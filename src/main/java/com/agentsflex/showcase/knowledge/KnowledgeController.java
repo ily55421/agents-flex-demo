@@ -26,7 +26,7 @@ import java.util.Map;
 @RequestMapping("/api/knowledge")
 public class KnowledgeController {
 
-    private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("txt", "md", "markdown");
+    private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("txt", "md", "markdown", "jsonl");
 
     private final KnowledgeService knowledgeService;
     private final KnowledgeDocumentStore documentStore;
@@ -96,6 +96,9 @@ public class KnowledgeController {
         String resolvedTitle = title == null || title.trim().isEmpty()
                 ? originalName.substring(0, originalName.length() - extension.length() - 1)
                 : title.trim();
+        if ("jsonl".equals(extension)) {
+            return knowledgeService.addJsonlDocument(resolvedTitle, content);
+        }
         return knowledgeService.addDocument(resolvedTitle, content, "FILE");
     }
 
@@ -113,18 +116,20 @@ public class KnowledgeController {
     }
 
     /**
-     * 检索测试：返回 TopK 命中片段、分数与生效模式。
+     * 检索测试：返回 TopK 命中片段、分数与生效模式；可限定单个文档 namespace。
      *
-     * @param body query 必填，topK 可选
+     * @param body query 必填，topK / namespace 可选
      * @return 命中列表与生效检索模式
      */
     @PostMapping("/search")
     public Map<String, Object> search(@RequestBody Map<String, Object> body) {
         String query = body.get("query") == null ? null : String.valueOf(body.get("query"));
         int topK = body.get("topK") instanceof Number ? ((Number) body.get("topK")).intValue() : 0;
+        String namespace = body.get("namespace") == null ? null : String.valueOf(body.get("namespace"));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("query", query);
-        result.put("hits", knowledgeService.search(query, topK));
+        result.put("namespace", namespace == null || namespace.isBlank() ? "all" : namespace);
+        result.put("hits", knowledgeService.search(query, topK, namespace));
         return result;
     }
 

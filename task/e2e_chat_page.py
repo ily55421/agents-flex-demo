@@ -18,12 +18,12 @@ with sync_playwright() as p:
     page.wait_for_load_state('networkidle')
     page.wait_for_timeout(1500)
 
-    # 1. 顶部 Tab 存在且默认在工作台
+    # 1. 顶部 Tab 存在且默认在工作台（工作台 / 知识库 / 纯对话三页）
     tabs = page.locator('.page-tabs button')
-    assert tabs.count() == 2, f'Tab 数量异常: {tabs.count()}'
-    assert '工作台' in tabs.nth(0).inner_text() and '纯对话' in tabs.nth(1).inner_text()
+    assert tabs.count() == 3, f'Tab 数量异常: {tabs.count()}'
+    assert '工作台' in tabs.nth(0).inner_text() and '纯对话' in tabs.nth(2).inner_text()
     assert 'active' in (tabs.nth(0).get_attribute('class') or ''), '默认 Tab 不是工作台'
-    print('[1] 顶部 Tab: OK（Agent 工作台 / 纯对话）')
+    print('[1] 顶部 Tab: OK（Agent 工作台 / 知识库 / 纯对话）')
 
     # 2. 左栏已精简：模型连接字段不再常驻，改为摘要卡片 + 配置入口
     assert page.locator('#model-provider').count() == 0, '左栏仍残留模型连接字段'
@@ -88,7 +88,7 @@ with sync_playwright() as p:
     print('[7] 应用配置: OK ->', new_summary.replace('\n', ' | ')[:110])
 
     # 8. 切到纯对话页：智能体选择器 + 归档提示
-    tabs.nth(1).click()
+    tabs.nth(2).click()
     page.wait_for_timeout(1200)
     assert page.locator('.chat-home').count() == 1, '纯对话页未渲染'
     selector = page.locator('#chat-agent-select')

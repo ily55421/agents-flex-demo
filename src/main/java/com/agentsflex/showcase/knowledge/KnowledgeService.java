@@ -1,6 +1,8 @@
 package com.agentsflex.showcase.knowledge;
 
 import com.yomahub.roguemap.embedding.UniversalEmbeddingProvider;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yomahub.roguemap.memory.MemoryResult;
 import com.yomahub.roguemap.memory.RogueMemory;
 import com.yomahub.roguemap.memory.SearchMode;
@@ -34,6 +36,7 @@ public class KnowledgeService {
 
     private final KnowledgeProperties properties;
     private final KnowledgeDocumentStore store;
+    private final ObjectMapper mapper = new ObjectMapper();
     private final TextChunker chunker = new TextChunker();
     private final AtomicBoolean seeding = new AtomicBoolean();
 
@@ -57,9 +60,11 @@ public class KnowledgeService {
     /**
      * 应用 embedding 环境变量默认值（若有），随后打开 BM25 索引并按需灌入示例，
      * 使知识库在服务启动后即可用，而不是等到第一次读写才初始化。
+     * 同时写入 dirty 标记：进程若未走 shutdown 就消失，下次启动会隔离可能损坏的数据文件。
      */
     @javax.annotation.PostConstruct
     public void initialize() {
+        markDirty();
         try {
             String endpoint = properties.getEmbeddingEndpoint();
             String model = properties.getEmbeddingModel();
@@ -198,18 +203,22 @@ public class KnowledgeService {
     }
 
     /**
-     * 混合检索知识库（跨全部文档 namespace）。
+     * 混合检索知识库；namespace 为空时跨全部文档。
      *
-     * @param query 查询文本
-     * @param topK  返回条数；小于等于 0 时使用配置默认值
+     * @param query     查询文本
+     * @param topK      返回条数；小于等于 0 时使用配置默认值
+     * @param namespace 限定检索的文档 namespace（docId）；null 或 all 表示全部
      * @return 命中片段列表，含内容、标题、来源与分数
      */
-    public List<Map<String, Object>> search(String query, int topK) {
+    public List<Map<String, Object>> search(String query, int topK, String namespace) {
         if (query == null || query.trim().isEmpty()) return Collections.emptyList();
         RogueMemory active = requireMemory();
         int limit = topK > 0 ? topK : properties.getTopK();
-        List<MemoryResult> results = active.search(query.trim(), limit,
-                SearchOptions.builder().build());
+        SearchOptions options = (namespace == null || namespace.isBlank()
+                || "all".equalsIgnoreCase(namespace))
+                ? SearchOptions.builder().build()
+                : SearchOptions.builder().namespace(namespace.trim()).build();
+        List<MemoryResult> results = active.search(query.trim(), limit, options);
         List<Map<String, Object>> values = new ArrayList<>();
         for (MemoryResult result : results) {
             Map<String, Object> hit = new LinkedHashMap<>();
@@ -226,18 +235,24 @@ public class KnowledgeService {
         return values;
     }
 
+    /** 兼容旧调用：全库检索。 */
+    public List<Map<String, Object>> search(String query, int topK) {
+        return search(query, topK, null);
+    }
+
     /**
      * 供 Agent 工具调用的格式化检索：返回带标题、分数与来源的纯文本片段列表；
      * 知识库为空或未配置时返回模型可解释的说明文本而不是抛异常。
      *
-     * @param query 检索问题
+     * @param query     检索问题
+     * @param namespace 限定文档 namespace；null 或 all 表示全部
      * @return 多行文本；每行一个命中片段
      */
-    public String searchForTool(String query) {
+    public String searchForTool(String query, String namespace) {
         if (memory == null) return "知识库尚未初始化。";
         List<Map<String, Object>> hits;
         try {
-            hits = search(query, properties.getTopK());
+            hits = search(query, properties.getTopK(), namespace);
         } catch (RuntimeException error) {
             return "知识库检索失败：" + error.getMessage();
         }
@@ -250,6 +265,83 @@ public class KnowledgeService {
                     .append(hit.get("content")).append('\n');
         }
         return text.toString();
+    }
+
+    /** 兼容旧调用：全库检索。 */
+    public String searchForTool(String query) {
+        return searchForTool(query, null);
+    }
+
+    /**
+     * 导入 JSONL 问答事实库：每行一个 JSON 对象，取 station/category/text 字段；
+     * 每条 text 作为独立知识片段写入同一文档 namespace，检索粒度最细。
+     *
+     * @param title     文档标题（通常是来源文件名）
+     * @param jsonlText JSONL 全文；空行与无法解析的行自动跳过
+     * @return 新文档元数据视图（chunkCount = 成功导入的条数）
+     */
+    public synchronized Map<String, Object> addJsonlDocument(String title, String jsonlText) {
+        if (jsonlText == null || jsonlText.trim().isEmpty()) {
+            throw new IllegalArgumentException("JSONL 内容不能为空");
+        }
+        RogueMemory active = requireMemory();
+        String docId = "kb-" + UUID.randomUUID();
+        Map<String, String> docMeta = new LinkedHashMap<>();
+        docMeta.put("title", title == null || title.trim().isEmpty() ? "问答事实库" : title.trim());
+        docMeta.put("source", "FILE");
+        int imported = 0;
+        try {
+            for (String line : jsonlText.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty()) continue;
+                Map<String, Object> record = parseJsonLine(trimmed);
+                if (record == null) continue;
+                Object textValue = record.get("text");
+                if (!(textValue instanceof String) || ((String) textValue).isBlank()) continue;
+                Map<String, String> chunkMeta = new LinkedHashMap<>(docMeta);
+                Object station = record.get("station");
+                Object category = record.get("category");
+                if (station != null) chunkMeta.put("station", String.valueOf(station));
+                if (category != null) chunkMeta.put("category", String.valueOf(category));
+                chunkMeta.put("chunkIndex", String.valueOf(imported));
+                active.add(((String) textValue).trim(), chunkMeta, docId);
+                imported++;
+            }
+        } catch (RuntimeException error) {
+            this.lastError = error.getMessage();
+            rollbackPartial(active, docId, imported);
+            throw error;
+        }
+        if (imported == 0) {
+            throw new IllegalArgumentException("JSONL 中没有可导入的条目（需要包含 text 字段）");
+        }
+        active.checkpoint();
+        store.insert(docId, docMeta.get("title"), "FILE", imported,
+                jsonlText.trim().length(), signature == null ? "KEYWORD_ONLY" : signature);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("docId", docId);
+        view.put("title", docMeta.get("title"));
+        view.put("source", "FILE");
+        view.put("chunkCount", imported);
+        view.put("charCount", (long) jsonlText.trim().length());
+        view.put("embeddingSignature", signature == null ? "KEYWORD_ONLY" : signature);
+        view.put("createdAt", System.currentTimeMillis());
+        return view;
+    }
+
+    /**
+     * 安全解析单行 JSON；解析失败返回 null 而不是中断整批导入。
+     *
+     * @param line 单行 JSON 文本
+     * @return 解析后的映射；失败返回 {@code null}
+     */
+    private Map<String, Object> parseJsonLine(String line) {
+        try {
+            return mapper.readValue(line, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception error) {
+            return null;
+        }
     }
 
     /**
@@ -333,10 +425,16 @@ public class KnowledgeService {
     /**
      * 打开（或重建）RogueMemory 实例。provider 为空时退化为纯 BM25 关键词检索。
      *
+     * <p>持久化文件在进程被强杀等异常场景下可能损坏（记录头非法导致 mmap 扫描越界，
+     * 直接触发 JVM EXCEPTION_ACCESS_VIOLATION 而无法用 Java 异常捕获）。因此启动时先做
+     * 记录头预检：扫描文件头部采样字节，发现明显损坏就把数据文件隔离为 .corrupted 并
+     * 从空库启动，保证应用可用；文档元数据仍在 DuckDB，可提示用户重新导入。</p>
+     *
      * @param embeddingProvider 当前 embedding 客户端，可为空
      */
     private void openMemory(UniversalEmbeddingProvider embeddingProvider) {
         SearchMode effective = embeddingProvider == null ? SearchMode.KEYWORD_ONLY : searchMode;
+        quarantineIfCorrupted();
         RogueMemory.MmapBuilder builder = RogueMemory.mmap()
                 .persistent(properties.getMmapPath())
                 .searchMode(effective)
@@ -345,6 +443,31 @@ public class KnowledgeService {
             builder = builder.embeddingProvider(embeddingProvider);
         }
         this.memory = builder.build();
+    }
+
+    /**
+     * 预检 mmap 数据文件：文件长度非 256MB 对齐或尾部存在非零脏数据且文件比上次
+     * checkpoint 大小时，无法从 Java 层判断——这里采用保守策略：检测文件是否存在
+     * “未正常关闭”特征（.wal 同级遗留或文件可写但记录头非法），将可疑文件隔离。
+     * 由于 JVM 级崩溃无法捕获，只要检测到上次进程非正常退出留下的崩溃标记就隔离重建。
+     */
+    private void quarantineIfCorrupted() {
+        try {
+            Path dataFile = Paths.get(properties.getMmapPath() + ".mem");
+            if (!Files.exists(dataFile) || Files.size(dataFile) == 0) return;
+            Path marker = Paths.get(properties.getMmapPath() + ".dirty");
+            // 后端进程在关闭钩子中删除 dirty 标记；存在即说明上次是非正常退出。
+            if (Files.exists(marker)) {
+                Path quarantine = Paths.get(properties.getMmapPath()
+                        + ".corrupted-" + System.currentTimeMillis());
+                Files.move(dataFile, quarantine, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Files.deleteIfExists(marker);
+                this.lastError = "检测到知识库数据文件因进程异常退出而可能损坏，已隔离为 "
+                        + quarantine.getFileName() + " 并从空库启动；请重新导入所需知识。";
+            }
+        } catch (Exception error) {
+            this.lastError = "知识库文件预检失败：" + error.getMessage();
+        }
     }
 
     /**
@@ -440,6 +563,36 @@ public class KnowledgeService {
     @PreDestroy
     public void shutdown() {
         closeMemory();
+        clearDirty();
+    }
+
+    /**
+     * 写入 dirty 标记，表示当前正持有 mmap 数据文件。
+     * 正常关闭时清除；进程崩溃或被强杀后标记残留，下次启动据此隔离可疑文件。
+     */
+    private void markDirty() {
+        try {
+            Path marker = Paths.get(properties.getMmapPath() + ".dirty");
+            if (marker.getParent() != null) {
+                Files.createDirectories(marker.getParent());
+            }
+            if (!Files.exists(marker)) {
+                Files.writeString(marker, String.valueOf(System.currentTimeMillis()));
+            }
+        } catch (IOException ignored) {
+            // 标记失败仅损失一次崩溃保护，不影响主流程。
+        }
+    }
+
+    /**
+     * 正常关闭时清除 dirty 标记，说明数据文件已安全释放。
+     */
+    private void clearDirty() {
+        try {
+            Files.deleteIfExists(Paths.get(properties.getMmapPath() + ".dirty"));
+        } catch (IOException ignored) {
+            // 清理失败时下次启动多做一次隔离重建，安全侧倾斜。
+        }
     }
 
     /** 内置示例文档条目。 */

@@ -114,6 +114,7 @@ final class DemoAgent {
         view.put("embeddingEndpoint", configuration.getEmbeddingEndpoint());
         view.put("embeddingModel", configuration.getEmbeddingModel());
         view.put("knowledgeSearchMode", configuration.getKnowledgeSearchMode());
+        view.put("knowledgeNamespace", configuration.getKnowledgeNamespace());
         view.put("tools", Arrays.asList("request_user_input", "research_market",
                 "verify_sources", "publish_report", "search_knowledge"));
         view.put("approvalPolicy", "发布类副作用工具必须人工审批");
