@@ -1,0 +1,4 @@
+[submodule "RogueMemory"]
+	path = RogueMemory
+	url = https://github.com/ily55421/RogueMap.git
+	branch = patch/windows-mmap-crash-fix
