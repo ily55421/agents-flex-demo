@@ -45,6 +45,11 @@ agents-flex:
     search-mode: ${KNOWLEDGE_SEARCH_MODE:HYBRID}
     top-k: ${KNOWLEDGE_TOP_K:5}
     max-upload-bytes: ${KNOWLEDGE_MAX_UPLOAD_BYTES:2097152}
+    # 单文件解析上限（字节）：与上传限制分离，用于保护大文档解析；默认 50MB（对齐 WeKnora docreader）
+    max-parse-bytes: ${KNOWLEDGE_MAX_PARSE_BYTES:52428800}
+    # 结构化切片参数：对齐 WeKnora chunker 默认值（512 字符窗口 / 80 字符重叠）
+    chunk-size: ${KNOWLEDGE_CHUNK_SIZE:512}
+    chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:80}
     embedding-endpoint: ${EMBEDDING_ENDPOINT:}
     embedding-api-key: ${EMBEDDING_API_KEY:}
     embedding-model: ${EMBEDDING_MODEL:bge-m3}

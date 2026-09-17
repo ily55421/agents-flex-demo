@@ -1,5 +1,6 @@
 package com.agentsflex.showcase.api;
 
+import com.agentsflex.showcase.knowledge.parser.DocumentParseException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -24,6 +25,20 @@ public class ApiExceptionHandler {
      */
     @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
     public ResponseEntity<Map<String, Object>> handleRuntime(RuntimeException error) {
+        return response(HttpStatus.CONFLICT, error.getMessage());
+    }
+
+    /**
+     * 处理文档解析失败：格式不支持、文件损坏、PDF 无文本层（疑似扫描件）等。
+     *
+     * <p>这类问题由用户输入决定而非服务端故障，因此与参数校验错误一样映射为 4xx，
+     * 避免前端把「这个文件解析不了」误判为服务异常。</p>
+     *
+     * @param error 解析器抛出的异常，消息已整理为可操作的中文提示
+     * @return HTTP 409 及可直接展示的原因
+     */
+    @ExceptionHandler(DocumentParseException.class)
+    public ResponseEntity<Map<String, Object>> handleDocumentParse(DocumentParseException error) {
         return response(HttpStatus.CONFLICT, error.getMessage());
     }
 

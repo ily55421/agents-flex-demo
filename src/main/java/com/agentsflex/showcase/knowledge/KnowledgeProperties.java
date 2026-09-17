@@ -17,6 +17,12 @@ public class KnowledgeProperties {
     private String searchMode = "HYBRID";
     private int topK = 5;
     private long maxUploadBytes = 2 * 1024 * 1024L;
+    /** 单文件解析上限（字节）：与上传上限分离，供文档解析器保护大文件场景。 */
+    private long maxParseBytes = 50L * 1024 * 1024;
+    /** 切片窗口字符数；对齐 WeKnora chunker 默认 512。 */
+    private int chunkSize = 512;
+    /** 相邻切片重叠字符数；对齐 WeKnora chunker 默认 80。 */
+    private int chunkOverlap = 80;
     private String embeddingEndpoint = "";
     private String embeddingApiKey = "";
     private String embeddingModel = "bge-m3";
@@ -59,6 +65,30 @@ public class KnowledgeProperties {
 
     public void setMaxUploadBytes(long maxUploadBytes) {
         this.maxUploadBytes = maxUploadBytes;
+    }
+
+    public long getMaxParseBytes() {
+        return maxParseBytes;
+    }
+
+    public void setMaxParseBytes(long maxParseBytes) {
+        this.maxParseBytes = maxParseBytes;
+    }
+
+    public int getChunkSize() {
+        return chunkSize;
+    }
+
+    public void setChunkSize(int chunkSize) {
+        this.chunkSize = chunkSize;
+    }
+
+    public int getChunkOverlap() {
+        return chunkOverlap;
+    }
+
+    public void setChunkOverlap(int chunkOverlap) {
+        this.chunkOverlap = chunkOverlap;
     }
 
     public String getEmbeddingEndpoint() {

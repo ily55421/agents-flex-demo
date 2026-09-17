@@ -108,6 +108,29 @@
             <artifactId>agents-flex-chat-openai</artifactId>
             <version>${agents-flex.version}</version>
         </dependency>
+        <!-- 文档解析：PDF / Office / HTML 原生解析器组，替代 WeKnora 的 Python docreader 旁路服务，
+             使入库格式从 txt/md/jsonl 扩展为 11 种而无需引入进程外依赖 -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.4.1</version>
+        </dependency>
+        <!-- 旧版二进制格式（.doc / .xls / .ppt）支持 -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>5.4.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.19.1</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

@@ -2,6 +2,8 @@ package com.agentsflex.showcase.knowledge;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.agentsflex.showcase.knowledge.parser.DocumentParserRegistry;
+import com.agentsflex.showcase.knowledge.parser.ParsedDocument;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,7 +20,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -32,7 +33,6 @@ import java.util.Map;
 @RequestMapping("/api/knowledge")
 public class KnowledgeController {
 
-    private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("txt", "md", "markdown", "jsonl");
     /** 快照文件大小上限：全量向量以 Base64 JSON 计，3200 片段约 20MB，留足余量。 */
     private static final long MAX_SNAPSHOT_BYTES = 200L * 1024 * 1024;
 
@@ -40,6 +40,7 @@ public class KnowledgeController {
     private final KnowledgeDocumentStore documentStore;
     private final KnowledgeSettingsStore settingsStore;
     private final KnowledgeProperties properties;
+    private final DocumentParserRegistry parserRegistry;
     private final ObjectMapper mapper;
 
     /**
@@ -47,17 +48,20 @@ public class KnowledgeController {
      * @param documentStore    DuckDB 文档元数据
      * @param settingsStore    向量模型配置与自建预设持久化
      * @param properties       上传限制等配置
+     * @param parserRegistry   文档解析器注册表（多格式上传入库）
      * @param mapper           Jackson 序列化器（快照导出/导入）
      */
     public KnowledgeController(KnowledgeService knowledgeService,
                                KnowledgeDocumentStore documentStore,
                                KnowledgeSettingsStore settingsStore,
                                KnowledgeProperties properties,
+                               DocumentParserRegistry parserRegistry,
                                ObjectMapper mapper) {
         this.knowledgeService = knowledgeService;
         this.documentStore = documentStore;
         this.settingsStore = settingsStore;
         this.properties = properties;
+        this.parserRegistry = parserRegistry;
         this.mapper = mapper;
     }
 
@@ -89,11 +93,12 @@ public class KnowledgeController {
     }
 
     /**
-     * 上传 .txt/.md 文件并解析入库（multipart 路径）。文件名决定默认标题与格式校验。
+     * 上传文件并解析入库（multipart 路径）。支持 PDF / Word / Excel / PPT / HTML / Markdown /
+     * 文本等格式，由 {@link DocumentParserRegistry} 归一化为 Markdown 后入库。
      *
-     * @param file  上传文件；仅支持 UTF-8 文本，大小受 maxUploadBytes 限制
+     * @param file  上传文件；大小受 maxUploadBytes 限制，解析前另受 maxParseBytes 保护
      * @param title 可选标题，缺省使用文件名
-     * @return 新文档元数据视图
+     * @return 新文档元数据视图（附解析器、页数/表数等元数据）
      */
     @PostMapping("/documents/upload")
     public Map<String, Object> uploadDocument(@RequestParam("file") MultipartFile file,
@@ -101,21 +106,43 @@ public class KnowledgeController {
             throws IOException {
         String originalName = file.getOriginalFilename() == null ? "document" : file.getOriginalFilename();
         String extension = extensionOf(originalName);
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new IllegalArgumentException("仅支持 .txt / .md 文件，收到：" + originalName);
+        if (!parserRegistry.supports(originalName)) {
+            throw new IllegalArgumentException("不支持的文件格式 ." + extension
+                    + "，当前支持：" + String.join(" / ", parserRegistry.supportedExtensions()));
         }
         if (file.getSize() > properties.getMaxUploadBytes()) {
             throw new IllegalArgumentException("文件超过大小限制 "
                     + properties.getMaxUploadBytes() / 1024 / 1024 + "MB");
         }
-        String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        if (file.getSize() > properties.getMaxParseBytes()) {
+            throw new IllegalArgumentException("文件超过解析上限 "
+                    + properties.getMaxParseBytes() / 1024 / 1024 + "MB");
+        }
         String resolvedTitle = title == null || title.trim().isEmpty()
                 ? originalName.substring(0, originalName.length() - extension.length() - 1)
                 : title.trim();
+        byte[] bytes = file.getBytes();
         if ("jsonl".equals(extension)) {
-            return knowledgeService.addJsonlDocument(resolvedTitle, content);
+            // JSONL 走问答事实库路径：逐行解析为独立片段，检索粒度最细
+            return knowledgeService.addJsonlDocument(resolvedTitle,
+                    new String(bytes, StandardCharsets.UTF_8));
         }
-        return knowledgeService.addDocument(resolvedTitle, content, "FILE");
+        ParsedDocument parsed = parserRegistry.parse(originalName, bytes);
+        Map<String, Object> view = knowledgeService.addDocument(resolvedTitle, parsed.getMarkdown(), "FILE");
+        // 附上解析元数据：前端据此展示页数/表数/来源格式
+        view.put("parser", parsed.getMetadata().get("parser"));
+        for (Map.Entry<String, String> entry : parsed.getMetadata().entrySet()) {
+            view.putIfAbsent(entry.getKey(), entry.getValue());
+        }
+        return view;
+    }
+
+    /**
+     * @return 支持的入库格式与对应解析器，供前端文件选择器限制与提示
+     */
+    @GetMapping("/parsers")
+    public List<Map<String, Object>> parsers() {
+        return parserRegistry.describe();
     }
 
     /**
