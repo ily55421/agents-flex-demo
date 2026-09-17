@@ -1,6 +1,6 @@
 package com.agentsflex.showcase.model;
 
-import javax.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotBlank;
 
 /**
  * 定义同一 ChatMemory 会话中新一轮用户消息的请求体。

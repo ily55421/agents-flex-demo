@@ -1,12 +1,14 @@
 package com.agentsflex.showcase.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +24,8 @@ import java.util.Map;
  */
 @Component
 public class RunArchive {
+
+    private static final Logger log = LoggerFactory.getLogger(RunArchive.class);
 
     private static final String[] SCHEMA = {
             "CREATE TABLE IF NOT EXISTS agent_definition ("
@@ -66,6 +70,73 @@ public class RunArchive {
     public void ensureSchema() {
         for (String statement : SCHEMA) {
             jdbc.execute(statement);
+        }
+        migrateAgentDefinitions();
+    }
+
+    /**
+     * Agent 定义启动迁移：
+     * <ul>
+     *   <li>【每次启动】按 (name, version) 去重——agentId 已改为同名同版本确定性派生，
+     *       正常不会再产生副本；此步骤负责清理历史上随机 ID 时代的存量重复行，幂等自愈；</li>
+     *   <li>【一次性，标记 agent_meta.definition-budget-v2】旧默认工具调用预算 8 升到 100
+     *       （现默认 100），仍在使用默认值的存量定义统一升级，避免重建后立即 BUDGET_EXCEEDED；
+     *       升级后用户显式改回 8 不会被再次覆盖。</li>
+     * </ul>
+     * 在 ShowcaseRuntime 读取归档之前执行，保证重启后重建拿到迁移后的配置。
+     */
+    private void migrateAgentDefinitions() {
+        jdbc.execute("CREATE TABLE IF NOT EXISTS agent_meta ("
+                + " key VARCHAR PRIMARY KEY,"
+                + " value VARCHAR NOT NULL)");
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT agent_id, payload, created_at FROM agent_definition ORDER BY created_at");
+        // —— 去重：按 (name, version) 保留最新一行（ORDER BY created_at 升序遍历，后写入的覆盖先写入的）
+        Map<String, String> keepByGroup = new LinkedHashMap<>();
+        Map<String, String> groupOf = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> payloadOf = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String agentId = String.valueOf(row.get("agent_id"));
+            Map<String, Object> payload;
+            try {
+                payload = read(String.valueOf(row.get("payload")));
+            } catch (Exception error) {
+                log.warn("迁移跳过无法解析的 Agent 定义: {}", agentId);
+                continue;
+            }
+            String group = payload.getOrDefault("name", "") + "#v"
+                    + payload.getOrDefault("version", "");
+            groupOf.put(agentId, group);
+            keepByGroup.put(group, agentId);
+            payloadOf.put(agentId, payload);
+        }
+        int duplicatesRemoved = 0;
+        for (Map.Entry<String, String> entry : groupOf.entrySet()) {
+            if (!keepByGroup.get(entry.getValue()).equals(entry.getKey())) {
+                jdbc.update("DELETE FROM agent_definition WHERE agent_id = ?", entry.getKey());
+                duplicatesRemoved++;
+            }
+        }
+        // —— 预算升级：仅一次性执行（标记后用户显式设置的值不会被覆盖）
+        Integer done = jdbc.queryForObject(
+                "SELECT count(*) FROM agent_meta WHERE key = 'definition-budget-v2'", Integer.class);
+        int budgetsUpgraded = 0;
+        if (done == null || done == 0) {
+            for (String agentId : keepByGroup.values()) {
+                Map<String, Object> payload = payloadOf.get(agentId);
+                if (Integer.valueOf(8).equals(payload.get("maxToolCalls"))) {
+                    payload.put("maxToolCalls", 100);
+                    jdbc.update("UPDATE agent_definition SET payload = ? WHERE agent_id = ?",
+                            write(payload), agentId);
+                    budgetsUpgraded++;
+                }
+            }
+            jdbc.update("INSERT INTO agent_meta(key, value) VALUES ('definition-budget-v2', 'done') "
+                    + "ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+        }
+        if (duplicatesRemoved > 0 || budgetsUpgraded > 0) {
+            log.info("Agent 定义迁移完成: 清理同名同版本重复副本 {} 条，工具预算 8→100 升级 {} 条",
+                    duplicatesRemoved, budgetsUpgraded);
         }
     }
 
@@ -113,8 +184,8 @@ public class RunArchive {
     public void saveRunSnapshot(String runId, String conversationId, String agentId,
                                 String status, Map<String, Object> view) {
         Object createdAtValue = view.get("createdAt");
-        long createdAt = createdAtValue instanceof Number
-                ? ((Number) createdAtValue).longValue() : System.currentTimeMillis();
+        long createdAt = createdAtValue instanceof Number n
+                ? n.longValue() : System.currentTimeMillis();
         jdbc.update(
                 "INSERT INTO run_snapshot(run_id, conversation_id, agent_id, status, payload,"
                         + " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "

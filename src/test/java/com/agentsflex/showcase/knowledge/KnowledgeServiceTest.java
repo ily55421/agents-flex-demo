@@ -35,12 +35,13 @@ class KnowledgeServiceTest {
         store.ensureSchema();
         KnowledgeProperties properties = new KnowledgeProperties();
         properties.setMmapPath(tempDir.resolve("mem").toString().replace('\\', '/'));
+        properties.setSettingsPath(tempDir.resolve("settings.json").toString().replace('\\', '/'));
         properties.setSearchMode("KEYWORD_ONLY");
         properties.setTopK(3);
         // 不提供 embedding 默认值：整个链路应退化为 BM25 关键词检索
         properties.setEmbeddingEndpoint("");
         properties.setEmbeddingModel("");
-        service = new KnowledgeService(properties, store);
+        service = new KnowledgeService(properties, store, new KnowledgeSettingsStore(properties));
     }
 
     @AfterEach

@@ -3,10 +3,17 @@ import type {
     AgentRun,
     CreateAgentPayload,
     CreateRunPayload,
+    EmbeddingPreset,
+    GraphFactsResult,
+    GraphNodeDetail,
+    GraphStation,
+    GraphSummary,
+    GraphView,
     KnowledgeDocument,
     KnowledgeHit,
     KnowledgeSearchMode,
     KnowledgeStatus,
+    KnowledgeSyncResult,
     ModelProfile,
     ModelStatus,
     TraceView,
@@ -88,6 +95,16 @@ export const knowledgeApi = {
     status: () => request<KnowledgeStatus>(KNOWLEDGE_API_ROOT, '/status'),
     /** 已入库文档清单。 */
     documents: () => request<KnowledgeDocument[]>(KNOWLEDGE_API_ROOT, '/documents'),
+    /** 读取文档原始全文与元数据，供预览查看；旧文档可能没有保存原文（contentAvailable=false）。 */
+    getDocument: (docId: string) =>
+        request<KnowledgeDocument & { content: string | null; contentAvailable: boolean }>(
+            KNOWLEDGE_API_ROOT, `/documents/${docId}`),
+    /** 编辑文档全文：后端重新切片并向量化，检索立即生效。 */
+    updateDocument: (docId: string, title: string, content: string) =>
+        request<KnowledgeDocument>(KNOWLEDGE_API_ROOT, `/documents/${docId}`, {
+            method: 'PUT',
+            body: JSON.stringify({title, content}),
+        }),
     /** UI 粘贴文本方式添加文档。 */
     addDocument: (title: string, content: string) =>
         request<KnowledgeDocument>(KNOWLEDGE_API_ROOT, '/documents', {
@@ -115,7 +132,7 @@ export const knowledgeApi = {
             method: 'POST',
             body: JSON.stringify({query, topK, namespace}),
         }),
-    /** 应用向量模型档案到知识库。 */
+    /** 应用向量模型档案到知识库；后端会持久化，重启后自动恢复。 */
     configureEmbedding: (payload: {
         embeddingEndpoint: string; embeddingApiKey: string; embeddingModel: string;
         searchMode: KnowledgeSearchMode
@@ -123,6 +140,60 @@ export const knowledgeApi = {
         method: 'POST',
         body: JSON.stringify(payload),
     }),
+    /** 用户自建向量预设清单（服务端持久化，重启后仍可复用）。 */
+    embeddingPresets: () => request<EmbeddingPreset[]>(KNOWLEDGE_API_ROOT, '/embedding-presets'),
+    /** 新增或同名覆盖向量预设；返回更新后的清单。 */
+    saveEmbeddingPreset: (preset: EmbeddingPreset) =>
+        request<EmbeddingPreset[]>(KNOWLEDGE_API_ROOT, '/embedding-presets', {
+            method: 'POST',
+            body: JSON.stringify(preset),
+        }),
+    /** 删除指定名称的向量预设；返回更新后的清单。 */
+    deleteEmbeddingPreset: (name: string) =>
+        request<EmbeddingPreset[]>(KNOWLEDGE_API_ROOT, `/embedding-presets/${encodeURIComponent(name)}`,
+            {method: 'DELETE'}),
     /** 重建知识库：清空向量与元数据并重新灌入示例。 */
     rebuild: () => request<KnowledgeStatus>(KNOWLEDGE_API_ROOT, '/rebuild', {method: 'POST'}),
+    /** 全量快照导出地址（文档含原文 + 全部向量缓存），浏览器直接下载。 */
+    exportSnapshotUrl: `${KNOWLEDGE_API_ROOT}/export`,
+    /** 导入全量快照：源优先 upsert 合并，随后后端用缓存原地重建索引（零重新向量化）。 */
+    importSnapshot: async (file: File): Promise<KnowledgeSyncResult> => {
+        const form = new FormData()
+        form.append('file', file)
+        const response = await fetch(`${KNOWLEDGE_API_ROOT}/import`, {method: 'POST', body: form})
+        if (!response.ok) {
+            const body = (await response.json().catch(() => null)) as { message?: string } | null
+            throw new Error(body?.message || `快照导入失败 (${response.status})`)
+        }
+        return response.json() as Promise<KnowledgeSyncResult>
+    },
+}
+
+const GRAPH_API_ROOT = '/api/graph'
+
+export const graphApi = {
+    /** 图谱画布全量视图：谓词词典 + TBox + 实例节点 + 关系。 */
+    view: () => request<GraphView>(GRAPH_API_ROOT, '/view'),
+    /** 图谱统计：实体/关系/本体类计数、分布与入库状态。 */
+    summary: () => request<GraphSummary>(GRAPH_API_ROOT, '/summary'),
+    /** 站点清单：图谱实体计数 + 档案概要统计。 */
+    stations: () => request<GraphStation[]>(GRAPH_API_ROOT, '/stations'),
+    /** 单站完整档案：母线/主变/间隔/设备/连接/质量明细。 */
+    stationDocument: (name: string) =>
+        request<Record<string, unknown>>(GRAPH_API_ROOT, `/station/${encodeURIComponent(name)}`),
+    /** 知识问答事实检索：站点/类别/关键词过滤 + 分页。 */
+    facts: (params: { station?: string; category?: string; q?: string; limit?: number; offset?: number }) => {
+        const query = new URLSearchParams()
+        if (params.station) query.set('station', params.station)
+        if (params.category) query.set('category', params.category)
+        if (params.q) query.set('q', params.q)
+        query.set('limit', String(params.limit ?? 50))
+        query.set('offset', String(params.offset ?? 0))
+        return request<GraphFactsResult>(GRAPH_API_ROOT, `/facts?${query.toString()}`)
+    },
+    /** 节点详情：属性/别名 + 按中文谓词分组的邻接关系。 */
+    nodeDetail: (id: string) =>
+        request<GraphNodeDetail>(GRAPH_API_ROOT, `/node?id=${encodeURIComponent(id)}`),
+    /** 手动重建图谱入库（资源指纹比对，幂等）。 */
+    reimport: () => request<Record<string, unknown>>(GRAPH_API_ROOT, '/import', {method: 'POST'}),
 }

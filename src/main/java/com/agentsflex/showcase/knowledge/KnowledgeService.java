@@ -9,13 +9,15 @@ import com.yomahub.roguemap.memory.SearchMode;
 import com.yomahub.roguemap.memory.SearchOptions;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PreDestroy;
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +38,8 @@ public class KnowledgeService {
 
     private final KnowledgeProperties properties;
     private final KnowledgeDocumentStore store;
+    private final KnowledgeSettingsStore settings;
+    private final KnowledgeVectorCache vectorCache;
     private final ObjectMapper mapper = new ObjectMapper();
     private final TextChunker chunker = new TextChunker();
     private final AtomicBoolean seeding = new AtomicBoolean();
@@ -43,46 +47,88 @@ public class KnowledgeService {
     private volatile RogueMemory memory;
     private volatile UniversalEmbeddingProvider provider;
     private volatile String signature;
+    /** 用户最近一次提交的向量模型配置意图（探测失败也保留，用于状态展示“已配置”）。 */
+    private volatile String configuredEndpoint;
+    private volatile String configuredModel;
     private volatile SearchMode searchMode = SearchMode.HYBRID;
     private volatile String lastError;
     private volatile boolean seeded;
 
     /**
-     * @param properties 知识库默认配置（mmap 路径、检索模式、TopK、embedding 默认值）
-     * @param store      DuckDB 文档元数据存储
+     * @param properties  知识库默认配置（mmap 路径、检索模式、TopK、embedding 默认值）
+     * @param store       DuckDB 文档元数据存储
+     * @param settings    向量模型配置与自建预设的本地持久化
+     * @param vectorCache embedding 向量持久化缓存；null 时向量直连不缓存（测试场景）
      */
-    public KnowledgeService(KnowledgeProperties properties, KnowledgeDocumentStore store) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public KnowledgeService(KnowledgeProperties properties, KnowledgeDocumentStore store,
+                            KnowledgeSettingsStore settings, KnowledgeVectorCache vectorCache) {
         this.properties = properties;
         this.store = store;
+        this.settings = settings;
+        this.vectorCache = vectorCache;
         this.searchMode = parseMode(properties.getSearchMode());
     }
 
+    /** 兼容旧构造：向量不缓存。 */
+    public KnowledgeService(KnowledgeProperties properties, KnowledgeDocumentStore store,
+                            KnowledgeSettingsStore settings) {
+        this(properties, store, settings, null);
+    }
+
     /**
-     * 应用 embedding 环境变量默认值（若有），随后打开 BM25 索引并按需灌入示例，
-     * 使知识库在服务启动后即可用，而不是等到第一次读写才初始化。
-     * 同时写入 dirty 标记：进程若未走 shutdown 就消失，下次启动会隔离可能损坏的数据文件。
+     * 初始化知识库：丢弃上次遗留的 mmap 缓存，以纯关键词（BM25）模式打开索引，
+     * 并从 DuckDB 重建已入库文档；随后异步恢复上次保存的向量模型配置。
+     *
+     * <p>向量模型配置不再要求用户每次重启后手动重填：最近一次应用的配置已持久化，
+     * 启动后在后台线程重放 {@link #configure(String, String, String, String)}（含探测与
+     * 重建索引），失败自动退化为 BM25 并记录原因，不会阻塞或拖垮启动。</p>
      */
-    @javax.annotation.PostConstruct
+    @jakarta.annotation.PostConstruct
     public void initialize() {
+        discardStaleFiles();
         markDirty();
         try {
-            String endpoint = properties.getEmbeddingEndpoint();
-            String model = properties.getEmbeddingModel();
-            if (endpoint != null && !endpoint.trim().isEmpty()
-                    && model != null && !model.trim().isEmpty()) {
-                configure(endpoint, properties.getEmbeddingApiKey(), model, null);
-            } else {
-                openMemory(null);
-            }
+            openMemory(null);
+            rebuildFromStore();
         } catch (RuntimeException error) {
             this.lastError = error.getMessage();
             if (memory == null) openMemory(null);
         }
+        restoreSavedEmbeddingAsync();
+    }
+
+    /**
+     * 后台重放上次保存的向量模型配置：放到独立线程是为了探测外部服务的网络等待
+     * 不拖慢应用启动；恢复结果（成功重建索引或失败降级 BM25）通过 status 反映。
+     */
+    private void restoreSavedEmbeddingAsync() {
+        Map<String, String> saved = settings.applied();
+        if (saved == null || isBlank(saved.get("endpoint")) || isBlank(saved.get("model"))) return;
+        Thread restorer = new Thread(() -> {
+            try {
+                configure(saved.get("endpoint"), saved.get("apiKey"),
+                        saved.get("model"), saved.get("searchMode"));
+            } catch (RuntimeException error) {
+                this.lastError = "自动恢复向量模型配置失败：" + error.getMessage();
+            }
+        }, "knowledge-embedding-restore");
+        restorer.setDaemon(true);
+        restorer.start();
+    }
+
+    /** @return 字符串非空（含非空白内容）时为 true */
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     /**
      * 应用 UI 或环境变量提供的 embedding 配置。签名未变化时幂等跳过；
      * 已有向量且签名不同则拒绝，要求先重建知识库。
+     *
+     * <p>即使目标服务探测失败也不抛异常：配置意图会被记录（status 返回
+     * embeddingConfigured=true 与模型名），检索自动退化为 BM25，错误原因写入
+     * lastError 供前端展示，避免“明明配置了却提示未配置”的割裂体验。</p>
      *
      * @param endpoint  OpenAI 兼容服务根地址（含 /v1），例如 http://127.0.0.1:18888/v1
      * @param apiKey    服务密钥；本地 Ollama 可空
@@ -103,10 +149,16 @@ public class KnowledgeService {
         if (normalizedEndpoint.endsWith("/")) {
             normalizedEndpoint = normalizedEndpoint.substring(0, normalizedEndpoint.length() - 1);
         }
+        // 记录配置意图：即使连接失败也让界面显示“已配置”而非“未配置”。
+        this.configuredEndpoint = normalizedEndpoint;
+        this.configuredModel = model.trim();
+        // 持久化配置意图：重启后自动重试同样的连接；探测失败也保存，服务恢复后一键重连。
+        settings.saveApplied(normalizedEndpoint, apiKey == null ? "" : apiKey.trim(),
+                model.trim(), searchMode.name());
         String newSignature = normalizedEndpoint + "|" + model.trim();
         if (newSignature.equals(signature) && memory != null) {
             ensureSeeded();
-            return false;
+            return true;
         }
         if (memory != null && store.count() > 0 && signature != null) {
             throw new IllegalStateException("知识库已有向量数据，切换 embedding 模型前请先重建知识库");
@@ -118,8 +170,12 @@ public class KnowledgeService {
         try {
             newProvider.embed("embedding connectivity probe");
         } catch (RuntimeException error) {
+            // 连接失败：保留“已配置”状态与错误原因，检索自动退化为 BM25，不阻断使用。
             this.lastError = friendlyEmbeddingError(normalizedEndpoint, model.trim(), error);
-            throw new IllegalStateException(this.lastError);
+            this.provider = null;
+            this.signature = null;
+            if (memory == null) openMemory(null);
+            return true;
         }
         closeMemory();
         this.provider = newProvider;
@@ -132,9 +188,10 @@ public class KnowledgeService {
             this.provider = null;
             this.signature = null;
             openMemory(null);
-            throw new IllegalStateException(this.lastError);
+            return true;
         }
         this.lastError = null;
+        rebuildFromStore();
         ensureSeeded();
         return true;
     }
@@ -190,7 +247,7 @@ public class KnowledgeService {
         }
         active.checkpoint();
         store.insert(docId, metadata.get("title"), source, chunks.size(),
-                content.trim().length(), signature == null ? "KEYWORD_ONLY" : signature);
+                content.trim().length(), signature == null ? "KEYWORD_ONLY" : signature, content.trim());
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("docId", docId);
         view.put("title", metadata.get("title"));
@@ -317,7 +374,7 @@ public class KnowledgeService {
         }
         active.checkpoint();
         store.insert(docId, docMeta.get("title"), "FILE", imported,
-                jsonlText.trim().length(), signature == null ? "KEYWORD_ONLY" : signature);
+                jsonlText.trim().length(), signature == null ? "KEYWORD_ONLY" : signature, jsonlText.trim());
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("docId", docId);
         view.put("title", docMeta.get("title"));
@@ -342,6 +399,114 @@ public class KnowledgeService {
         } catch (Exception error) {
             return null;
         }
+    }
+
+    /**
+     * 读取文档原始全文与元数据，供前端预览。
+     *
+     * @param docId 文档 ID
+     * @return 包含 docId / title / content / contentAvailable / chunkCount / charCount / source 的视图；
+     *         文档不存在时返回 {@code null}
+     */
+    public synchronized Map<String, Object> getDocumentContent(String docId) {
+        String content = store.loadContent(docId);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("docId", docId);
+        view.put("title", titleOf(docId));
+        view.put("chunkCount", chunkCountOf(docId));
+        view.put("source", sourceOf(docId));
+        if (content == null || content.isEmpty()) {
+            // content 列迁移前入库的旧文档没有保存原始全文，标记为不可预览；
+            // 前端提示可粘贴新内容覆盖保存（保存后即写入 content 列）。
+            view.put("content", null);
+            view.put("contentAvailable", false);
+            view.put("charCount", 0L);
+        } else {
+            view.put("content", content);
+            view.put("contentAvailable", true);
+            view.put("charCount", (long) content.length());
+        }
+        return view;
+    }
+
+    /**
+     * 编辑文档全文：删除旧 namespace 的所有切片，按新文本重新切片并向量化，
+     * 更新 DuckDB 元数据与原始全文。修改后检索立即使用新向量。
+     *
+     * @param docId   文档 ID
+     * @param title   新标题（可空，沿用原标题）
+     * @param content 新全文；非空
+     * @return 更新后的文档元数据视图
+     */
+    public synchronized Map<String, Object> updateDocument(String docId, String title, String content) {
+        if (content == null || content.trim().isEmpty()) {
+            throw new IllegalArgumentException("文档内容不能为空");
+        }
+        RogueMemory active = requireMemory();
+        String resolvedTitle = title == null || title.trim().isEmpty() ? titleOf(docId) : title.trim();
+        List<String> chunks = chunker.chunk(content.trim());
+        if (chunks.isEmpty()) throw new IllegalArgumentException("文档没有可入库的有效内容");
+        String previousTitle = titleOf(docId);
+        String source = sourceOf(docId);
+        // 1. 删除旧向量切片，避免新旧内容混存。
+        active.deleteByNamespace(docId);
+        // 2. 按新内容重新写入切片。
+        Map<String, String> metadata = new LinkedHashMap<>();
+        metadata.put("title", resolvedTitle);
+        metadata.put("source", source == null ? "MANUAL" : source);
+        try {
+            for (int index = 0; index < chunks.size(); index++) {
+                Map<String, String> chunkMeta = new LinkedHashMap<>(metadata);
+                chunkMeta.put("chunkIndex", String.valueOf(index));
+                active.add(chunks.get(index), chunkMeta, docId);
+            }
+        } catch (RuntimeException error) {
+            this.lastError = error.getMessage();
+            throw error;
+        }
+        active.checkpoint();
+        store.update(docId, resolvedTitle, chunks.size(), content.trim().length(),
+                signature == null ? "KEYWORD_ONLY" : signature, content.trim());
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("docId", docId);
+        view.put("title", resolvedTitle);
+        view.put("source", source == null ? "MANUAL" : source);
+        view.put("chunkCount", chunks.size());
+        view.put("charCount", (long) content.trim().length());
+        view.put("embeddingSignature", signature == null ? "KEYWORD_ONLY" : signature);
+        view.put("createdAt", System.currentTimeMillis());
+        view.put("updatedFrom", previousTitle);
+        return view;
+    }
+
+    /** 从元数据表读取文档标题；不存在返回 docId 本身。 */
+    private String titleOf(String docId) {
+        for (Map<String, Object> row : store.list()) {
+            if (docId.equals(row.get("docId"))) return String.valueOf(row.get("title"));
+        }
+        return docId;
+    }
+
+    /** 从元数据表读取文档来源类型。 */
+    private String sourceOf(String docId) {
+        for (Map<String, Object> row : store.list()) {
+            if (docId.equals(row.get("docId"))) {
+                Object source = row.get("source");
+                return source == null ? null : String.valueOf(source);
+            }
+        }
+        return null;
+    }
+
+    /** 从元数据表读取切片数。 */
+    private int chunkCountOf(String docId) {
+        for (Map<String, Object> row : store.list()) {
+            if (docId.equals(row.get("docId"))) {
+                Object count = row.get("chunkCount");
+                return count instanceof Number n ? n.intValue() : 0;
+            }
+        }
+        return 0;
     }
 
     /**
@@ -374,6 +539,148 @@ public class KnowledgeService {
     }
 
     /**
+     * 导出知识库全量快照：文档清单（含原始全文）与全部向量缓存。
+     *
+     * <p>跨环境同步用：目标实例导入后无需重新向量化，索引重建全部由向量缓存供数。
+     * 向量为原始小端序 float 字节，由 Jackson 序列化为 Base64 字符串。</p>
+     *
+     * @return 含 version / exportedAt / documents / vectors 的快照映射
+     */
+    public Map<String, Object> exportSnapshot() {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("version", 1);
+        snapshot.put("exportedAt", System.currentTimeMillis());
+        snapshot.put("documents", store.listWithContent());
+        snapshot.put("vectors", vectorCache == null
+                ? Collections.emptyList() : vectorCache.listAllVectors());
+        return snapshot;
+    }
+
+    /**
+     * 导入知识库快照：文档与向量按源优先 upsert 合并，随后用缓存原地重建索引，
+     * 导入内容立即对检索可见且不产生 embedding 网络调用（新文本除外）。
+     *
+     * <p>非事务：两张表逐行写入，中途失败可重复导入（幂等）补齐。索引重建失败时
+     * 不影响已导入数据，重启应用即可恢复。</p>
+     *
+     * @param payload {@link #exportSnapshot()} 产出的快照映射
+     * @return 文档与向量的合并计数及索引刷新结果
+     */
+    public synchronized Map<String, Object> importSnapshot(Map<String, Object> payload) {
+        Object version = payload.get("version");
+        if (!(version instanceof Number n) || n.intValue() != 1) {
+            throw new IllegalArgumentException("不支持的快照版本: " + version + "，期望 version=1");
+        }
+        List<Map<String, Object>> documents = castList(payload.get("documents"));
+        List<Map<String, Object>> vectors = castList(payload.get("vectors"));
+
+        java.util.Set<String> existingDocIds = store.existingDocIds();
+        int documentsUpserted = 0;
+        int documentsAdded = 0;
+        for (Map<String, Object> doc : documents) {
+            Object docIdValue = doc.get("docId");
+            if (docIdValue == null) continue;
+            String docId = String.valueOf(docIdValue);
+            boolean added = store.upsertDocument(docId,
+                    stringOr(doc.get("title"), "未命名文档"),
+                    stringOr(doc.get("source"), "MANUAL"),
+                    numberOr(doc.get("chunkCount"), 0).intValue(),
+                    numberOr(doc.get("charCount"), 0).longValue(),
+                    doc.get("embeddingSignature") == null ? null : String.valueOf(doc.get("embeddingSignature")),
+                    doc.get("content") == null ? null : String.valueOf(doc.get("content")),
+                    numberOr(doc.get("createdAt"), System.currentTimeMillis()).longValue());
+            if (added && !existingDocIds.contains(docId)) documentsAdded++;
+            documentsUpserted++;
+        }
+
+        int vectorsAdded = 0;
+        int vectorsSkipped = 0;
+        java.util.Map<String, java.util.Set<String>> existingBySignature = new LinkedHashMap<>();
+        for (Map<String, Object> entry : vectors) {
+            Object hashValue = entry.get("textHash");
+            String signature = entry.get("signature") == null ? null : String.valueOf(entry.get("signature"));
+            if (hashValue == null || signature == null || vectorCache == null) {
+                vectorsSkipped++;
+                continue;
+            }
+            String textHash = String.valueOf(hashValue);
+            java.util.Set<String> existing = existingBySignature.computeIfAbsent(
+                    signature, ignored -> vectorCache.existingTextHashes(signature));
+            if (existing.contains(textHash)) {
+                vectorsSkipped++;
+                continue;
+            }
+            float[] vector = decodeVector(entry);
+            vectorCache.saveVector(signature, textHash, vector);
+            existing.add(textHash);
+            vectorsAdded++;
+        }
+
+        boolean indexRefreshed = refreshIndexQuietly();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("documentsUpserted", documentsUpserted);
+        result.put("documentsAdded", documentsAdded);
+        result.put("vectorsAdded", vectorsAdded);
+        result.put("vectorsSkipped", vectorsSkipped);
+        result.put("indexRefreshed", indexRefreshed);
+        result.put("lastError", lastError);
+        return result;
+    }
+
+    /**
+     * 关闭当前索引并从 DuckDB 原地重建（向量走缓存），导入后立即可检索。
+     * 失败时退回关键词模式并记录原因，已导入的数据不受影响（重启可重试）。
+     */
+    private boolean refreshIndexQuietly() {
+        try {
+            closeMemory();
+            openMemory(provider);
+            rebuildFromStore();
+            ensureSeeded();
+            return true;
+        } catch (RuntimeException error) {
+            this.lastError = "导入后索引重建失败：" + error.getMessage();
+            if (memory == null) openMemory(null);
+            return false;
+        }
+    }
+
+    /** 快照 documents/vectors 字段的安全列表转换；类型不符视为空。 */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> castList(Object value) {
+        if (!(value instanceof List<?> list)) return Collections.emptyList();
+        List<Map<String, Object>> values = new ArrayList<>(list.size());
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) values.add((Map<String, Object>) map);
+        }
+        return values;
+    }
+
+    /** 解析快照中的 Base64 向量为 float 数组；字节序与导出一致（小端）。 */
+    private static float[] decodeVector(Map<String, Object> entry) {
+        Object encoded = entry.get("vector");
+        if (!(encoded instanceof String text) || text.isBlank()) {
+            throw new IllegalArgumentException("快照向量缺少 vector 字段 (textHash="
+                    + entry.get("textHash") + ")");
+        }
+        byte[] bytes = Base64.getDecoder().decode(text);
+        float[] vector = new float[bytes.length / Float.BYTES];
+        // 与 KnowledgeVectorCache.saveVector 相同的大端字节序
+        ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).asFloatBuffer().get(vector);
+        return vector;
+    }
+
+    /** 取映射中的字符串值；null 返回默认值。 */
+    private static String stringOr(Object value, String fallback) {
+        return value == null ? fallback : String.valueOf(value);
+    }
+
+    /** 取映射中的数值；null 或非数返回默认值。 */
+    private static Number numberOr(Object value, Number fallback) {
+        return value instanceof Number n ? n : fallback;
+    }
+
+    /**
      * @return 知识库状态：就绪度、文档/切片计数、生效签名、维度与最近错误
      */
     public Map<String, Object> status() {
@@ -381,9 +688,11 @@ public class KnowledgeService {
         view.put("ready", memory != null);
         view.put("searchMode", searchMode.name());
         view.put("topK", properties.getTopK());
-        view.put("embeddingConfigured", provider != null);
+        // 用户提交过向量模型配置即视为“已配置”（即使连接失败），便于界面展示意图；
+        // 实际生效与否由 provider 是否可用决定，失败原因始终在 lastError。
+        view.put("embeddingConfigured", provider != null || configuredModel != null);
         view.put("embeddingSignature", signature);
-        view.put("embeddingModel", signature == null ? null : signature.split("\\|", 2)[1]);
+        view.put("embeddingModel", signature == null ? configuredModel : signature.split("\\|", 2)[1]);
         view.put("dimension", provider == null ? 0 : provider.getDimension());
         view.put("documentCount", store.count());
         view.put("chunkCount", store.totalChunks());
@@ -391,6 +700,8 @@ public class KnowledgeService {
         view.put("seeded", seeded);
         view.put("lastError", lastError);
         view.put("mmapPath", properties.getMmapPath());
+        // 最近一次应用的向量配置（含 Key，仅回显给本机前端用于重启后免重填）。
+        view.put("savedEmbedding", settings.applied());
         return view;
     }
 
@@ -425,48 +736,91 @@ public class KnowledgeService {
     /**
      * 打开（或重建）RogueMemory 实例。provider 为空时退化为纯 BM25 关键词检索。
      *
-     * <p>持久化文件在进程被强杀等异常场景下可能损坏（记录头非法导致 mmap 扫描越界，
-     * 直接触发 JVM EXCEPTION_ACCESS_VIOLATION 而无法用 Java 异常捕获）。因此启动时先做
-     * 记录头预检：扫描文件头部采样字节，发现明显损坏就把数据文件隔离为 .corrupted 并
-     * 从空库启动，保证应用可用；文档元数据仍在 DuckDB，可提示用户重新导入。</p>
+     * <p>provider 一律经 {@link CachedEmbeddingProvider} 包装：启动重建与检索产生的
+     * 向量计算先查 DuckDB 缓存，未命中才访问真实服务，使重启后的全量重建不再依赖
+     * embedding 服务的可用性与耗时。</p>
+     *
+     * <p>崩溃防护：RogueMemory 默认的 autoExpand(true) 会在文件写满时扩展并重新映射
+     * mmap，Windows 上旧映射地址在扩展后可能失效，运行期访问时直接触发
+     * EXCEPTION_ACCESS_VIOLATION（无法用 Java 异常捕获）。因此这里一次性分配足够大的
+     * 固定文件并关闭自动扩展，写入不触发重映射，保持运行期稳定。</p>
      *
      * @param embeddingProvider 当前 embedding 客户端，可为空
      */
     private void openMemory(UniversalEmbeddingProvider embeddingProvider) {
         SearchMode effective = embeddingProvider == null ? SearchMode.KEYWORD_ONLY : searchMode;
-        quarantineIfCorrupted();
+        long fixedSize = 1L * 1024 * 1024 * 1024;
         RogueMemory.MmapBuilder builder = RogueMemory.mmap()
                 .persistent(properties.getMmapPath())
                 .searchMode(effective)
-                .autoExpand(true);
+                .allocateSize(fixedSize)
+                .maxFileSize(fixedSize)
+                .autoExpand(false);
         if (embeddingProvider != null) {
-            builder = builder.embeddingProvider(embeddingProvider);
+            builder = builder.embeddingProvider(new CachedEmbeddingProvider(
+                    embeddingProvider, signature, vectorCache));
         }
         this.memory = builder.build();
     }
 
     /**
-     * 预检 mmap 数据文件：文件长度非 256MB 对齐或尾部存在非零脏数据且文件比上次
-     * checkpoint 大小时，无法从 Java 层判断——这里采用保守策略：检测文件是否存在
-     * “未正常关闭”特征（.wal 同级遗留或文件可写但记录头非法），将可疑文件隔离。
-     * 由于 JVM 级崩溃无法捕获，只要检测到上次进程非正常退出留下的崩溃标记就隔离重建。
+     * 启动时丢弃上次进程遗留的 mmap 数据文件与 dirty 标记。
+     *
+     * <p>RogueMemory 重新打开已持久化文件时会在 parseRecordHeader 越界导致 JVM 原生
+     * 崩溃（无法捕获），因此本项目不再尝试“安全恢复”旧文件，而是每次启动强制新建，
+     * 索引内容统一由 {@link #rebuildFromStore()} 从 DuckDB 重新切片写入。文档元数据
+     * 与原文都在 DuckDB，丢弃 mmap 缓存不丢失任何用户数据。</p>
      */
-    private void quarantineIfCorrupted() {
+    private void discardStaleFiles() {
         try {
-            Path dataFile = Paths.get(properties.getMmapPath() + ".mem");
-            if (!Files.exists(dataFile) || Files.size(dataFile) == 0) return;
-            Path marker = Paths.get(properties.getMmapPath() + ".dirty");
-            // 后端进程在关闭钩子中删除 dirty 标记；存在即说明上次是非正常退出。
-            if (Files.exists(marker)) {
-                Path quarantine = Paths.get(properties.getMmapPath()
-                        + ".corrupted-" + System.currentTimeMillis());
-                Files.move(dataFile, quarantine, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                Files.deleteIfExists(marker);
-                this.lastError = "检测到知识库数据文件因进程异常退出而可能损坏，已隔离为 "
-                        + quarantine.getFileName() + " 并从空库启动；请重新导入所需知识。";
-            }
+            Files.deleteIfExists(Path.of(properties.getMmapPath() + ".mem"));
+            Files.deleteIfExists(Path.of(properties.getMmapPath() + ".dirty"));
+            Files.deleteIfExists(Path.of(properties.getMmapPath() + ".wal"));
         } catch (Exception error) {
-            this.lastError = "知识库文件预检失败：" + error.getMessage();
+            this.lastError = "知识库缓存文件清理失败：" + error.getMessage();
+        }
+    }
+
+    /**
+     * 从 DuckDB 元数据与原文重建 mmap 索引：遍历全部文档，逐篇重新切片并写入
+     * RogueMemory，最后 checkpoint 并回写切片数。旧格式文档（未保存原文）跳过。
+     */
+    private void rebuildFromStore() {
+        List<Map<String, Object>> rows = store.list();
+        if (rows.isEmpty()) return;
+        RogueMemory active = requireMemory();
+        int rebuilt = 0;
+        for (Map<String, Object> row : rows) {
+            String docId = String.valueOf(row.get("docId"));
+            String content = store.loadContent(docId);
+            if (content == null || content.trim().isEmpty()) continue;
+            Object titleObj = row.get("title");
+            String title = titleObj == null ? docId : String.valueOf(titleObj);
+            Object sourceObj = row.get("source");
+            String source = sourceObj == null ? "MANUAL" : String.valueOf(sourceObj);
+            List<String> chunks = chunker.chunk(content.trim());
+            if (chunks.isEmpty()) continue;
+            Map<String, String> metadata = new LinkedHashMap<>();
+            metadata.put("title", title);
+            metadata.put("source", source);
+            try {
+                for (int index = 0; index < chunks.size(); index++) {
+                    Map<String, String> chunkMeta = new LinkedHashMap<>(metadata);
+                    chunkMeta.put("chunkIndex", String.valueOf(index));
+                    active.add(chunks.get(index), chunkMeta, docId);
+                }
+            } catch (RuntimeException error) {
+                this.lastError = "索引重建失败（" + title + "）：" + error.getMessage();
+                continue;
+            }
+            store.update(docId, title, chunks.size(), content.trim().length(),
+                    signature == null ? "KEYWORD_ONLY" : signature, content.trim());
+            rebuilt++;
+        }
+        active.checkpoint();
+        if (rebuilt > 0) {
+            this.seeded = true;
+            this.lastError = null;
         }
     }
 
@@ -519,7 +873,7 @@ public class KnowledgeService {
      * 避免旧索引在 Windows 上静默残留。
      */
     private void deleteMmapFiles() throws IOException {
-        Path target = Paths.get(properties.getMmapPath()).toAbsolutePath().normalize();
+        Path target = Path.of(properties.getMmapPath()).toAbsolutePath().normalize();
         Path parent = target.getParent();
         String baseName = target.getFileName().toString();
         if (parent == null || !Files.isDirectory(parent)) {
@@ -572,7 +926,7 @@ public class KnowledgeService {
      */
     private void markDirty() {
         try {
-            Path marker = Paths.get(properties.getMmapPath() + ".dirty");
+            Path marker = Path.of(properties.getMmapPath() + ".dirty");
             if (marker.getParent() != null) {
                 Files.createDirectories(marker.getParent());
             }
@@ -589,7 +943,7 @@ public class KnowledgeService {
      */
     private void clearDirty() {
         try {
-            Files.deleteIfExists(Paths.get(properties.getMmapPath() + ".dirty"));
+            Files.deleteIfExists(Path.of(properties.getMmapPath() + ".dirty"));
         } catch (IOException ignored) {
             // 清理失败时下次启动多做一次隔离重建，安全侧倾斜。
         }

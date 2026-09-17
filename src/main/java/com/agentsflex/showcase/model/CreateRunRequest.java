@@ -1,6 +1,6 @@
 package com.agentsflex.showcase.model;
 
-import javax.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotBlank;
 
 /**
  * 定义使用已创建 Agent 开启新对话所需的最小请求。

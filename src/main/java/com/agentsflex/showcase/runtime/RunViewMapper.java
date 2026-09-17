@@ -264,16 +264,16 @@ final class RunViewMapper {
         for (Message message : source) {
             if (message == null) continue;
             String content = message.getTextContent();
-            List<Map<String, Object>> calls = message instanceof AiMessage
-                    ? toolCalls(((AiMessage) message).getToolCalls()) : new ArrayList<>();
+            List<Map<String, Object>> calls = message instanceof AiMessage am
+                    ? toolCalls(am.getToolCalls()) : new ArrayList<>();
             if ((content == null || content.trim().isEmpty()) && calls.isEmpty()) continue;
             Map<String, Object> value = new LinkedHashMap<>();
             value.put("id", message.getMessageId());
             value.put("role", message instanceof UserMessage ? "user"
                     : message instanceof ToolMessage ? "tool" : "assistant");
             value.put("content", content);
-            value.put("reasoning", message instanceof AiMessage
-                    ? ((AiMessage) message).getReasoningContent() : null);
+            value.put("reasoning", message instanceof AiMessage am
+                    ? am.getReasoningContent() : null);
             value.put("toolCalls", calls);
             values.add(value);
         }

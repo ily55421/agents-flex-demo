@@ -10,7 +10,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 /**
  * DuckDB 嵌入式数据库连接配置。
@@ -42,7 +41,7 @@ public class DuckDbConfig {
                 ? duckDbUrl.substring(JDBC_PREFIX.length()) : duckDbUrl;
         if (filePart != null && !filePart.trim().isEmpty()
                 && !filePart.trim().startsWith(":memory:")) {
-            Path file = Paths.get(filePart.trim()).toAbsolutePath();
+            Path file = Path.of(filePart.trim()).toAbsolutePath();
             Path parent = file.getParent();
             if (parent != null) Files.createDirectories(parent);
         }

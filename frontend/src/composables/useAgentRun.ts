@@ -17,6 +17,9 @@ import type {
 const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED', 'MAX_ITERATIONS_REACHED',
     'MAX_STEPS_REACHED', 'BUDGET_EXCEEDED']
 
+/** 已选 Agent 的本地持久化键：刷新后自动恢复选中，不必重新选择。 */
+const SELECTED_AGENT_KEY = 'agents-flex-demo.selected-agent-id'
+
 export const useAgentRun = defineStore('agent-run', () => {
     // run 是后端 Snapshot 的本地镜像；trace 是 OTel 导出结果，两者共同驱动全部面板。
     const run = ref<AgentRun | null>(null)
@@ -388,10 +391,59 @@ export const useAgentRun = defineStore('agent-run', () => {
             installTrace(restoredTrace)
             connect(runId)
         } catch (cause) {
-            error.value = cause instanceof Error ? cause.message : '无法恢复当前 Run'
+            const message = cause instanceof Error ? cause.message : String(cause)
+            if (message.includes('not found')) {
+                // URL 里的 Run 在后端重启后已不存在（内存快照清空且未归档）：
+                // 静默清理 run 参数即可，弹错误只会让用户困惑；历史会话可从列表重新打开。
+                setLocationRun(null)
+            } else {
+                error.value = cause instanceof Error ? cause.message : '无法恢复当前 Run'
+            }
         } finally {
             busy.value = false
         }
+        // 页面刷新后恢复上次选中的 Agent（URL run 恢复的会话优先，不覆盖）。
+        if (!agent.value) {
+            try {
+                const savedId = localStorage.getItem(SELECTED_AGENT_KEY)
+                if (savedId) {
+                    const definitions = await agentApi.listAgents()
+                    const saved = definitions.find(item => item.agentId === savedId)
+                    if (saved) agent.value = saved
+                }
+            } catch {
+                // 恢复失败不影响正常流程，用户可手动重新选择。
+            }
+        }
+    }
+
+    /**
+     * 把会话页选择的智能体设为当前工作区 Agent：不请求后端、不创建 Run，
+     * 只影响下一次「发送消息」时创建 Run 使用的 agentId。
+     * @param definition 已创建且可运行的 Agent 定义
+     */
+    function selectAgent(definition: AgentDefinition) {
+        agent.value = definition
+        // 选中状态持久化：刷新后自动恢复（见 initialize 的恢复逻辑）。
+        try {
+            localStorage.setItem(SELECTED_AGENT_KEY, definition.agentId)
+        } catch {
+            // 隐私模式等 localStorage 不可用时静默跳过，仅失去刷新恢复能力。
+        }
+    }
+
+    /**
+     * 用已创建（或归档）的 Agent 定义重建运行对象。归档安全视图不含 API Key：
+     * 免密钥服务（本地 Ollama、内网网关）可直接重建成功；需要密钥的服务由
+     * 后端报错提示，应到「Agent 维护」页填写 Key 后创建。
+     * @param definition 归档或现有的 Agent 定义
+     */
+    async function recreateAgent(definition: AgentDefinition) {
+        const {
+            agentId: _agentId, tools: _tools, approvalPolicy: _approvalPolicy,
+            createdAt: _createdAt, runnable: _runnable, ...configuration
+        } = definition
+        await createAgent({...configuration, modelApiKey: ''})
     }
 
     /**
@@ -511,6 +563,8 @@ export const useAgentRun = defineStore('agent-run', () => {
         isTerminal,
         createAgent,
         applyModelConfiguration,
+        selectAgent,
+        recreateAgent,
         create,
         continueConversation,
         initialize,

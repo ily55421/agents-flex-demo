@@ -52,7 +52,7 @@ const defaults: CreateAgentPayload = {
   maxInputTokens: 16000,
   maxOutputTokens: 8192,
   maxTotalTokens: 32000,
-  maxToolCalls: 8,
+  maxToolCalls: 100,
   maxDurationMillis: 1800000,
   maxRetries: 2,
   initialDelayMillis: 0,
@@ -234,10 +234,9 @@ function applyModelDialog(model: ModelProfile, embedding: EmbeddingProfile) {
   stopText.value = Array.isArray(form.modelStop) ? form.modelStop.join(', ') : ''
   dialogOpen.value = false
   emit('applyModel', {...model, modelStop: [...(Array.isArray(model.modelStop) ? model.modelStop : [])]})
-  // 向量模型同时同步给知识库，避免“配置了但没生效”的割裂体验；未填写时跳过。
-  if (embedding.embeddingEndpoint.trim() && embedding.embeddingModel.trim()) {
-    emit('configureEmbedding', {...embedding})
-  }
+  // 知识库的向量模型只在知识库页手动配置、手动应用（emit configureEmbedding 仅由
+  // 弹窗里的“应用到知识库”按钮触发），不再随聊天模型配置自动倒灌，避免误把
+  // 不支持 /embeddings 的服务写进知识库导致持续报错。
 }
 </script>
 

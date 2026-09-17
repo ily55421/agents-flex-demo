@@ -28,12 +28,18 @@ import com.agentsflex.core.message.AiMessage;
 import com.agentsflex.core.message.Message;
 import com.agentsflex.showcase.config.ModelProperties;
 import com.agentsflex.showcase.config.ModelConfiguration;
+import com.agentsflex.showcase.config.ModelSettingsStore;
+import com.agentsflex.showcase.graph.TopologyGraphService;
 import com.agentsflex.showcase.knowledge.KnowledgeService;
 import com.agentsflex.showcase.model.CreateAgentRequest;
 import com.agentsflex.showcase.model.UpdateModelRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import jakarta.annotation.PostConstruct;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -54,11 +60,59 @@ import java.util.concurrent.locks.LockSupport;
 @Component
 public final class ResearchAgentFactory {
 
+    private static final Logger log = LoggerFactory.getLogger(ResearchAgentFactory.class);
+
+    private static final ObjectMapper SETTINGS_MAPPER = new ObjectMapper();
+
     private final ChatModel chatModel;
     private final ChatModel compressionModel;
     private final ModelProperties modelProperties;
     private final ModelConfiguration modelConfiguration;
     private final KnowledgeService knowledgeService;
+
+    /** 电力拓扑图谱服务（可选：图谱未装配或测试场景为 null，工具返回提示文本）。 */
+    private volatile TopologyGraphService topologyGraphService;
+
+    /** 模型连接设置持久化（可选：测试场景为 null，跳过保存与恢复）。 */
+    private volatile ModelSettingsStore modelSettingsStore;
+
+    /**
+     * 注入拓扑图谱服务；图谱未启用时保持 null，query_topology 工具返回未启用提示。
+     *
+     * @param topologyGraphService 拓扑图谱服务
+     */
+    @Autowired(required = false)
+    public void setTopologyGraphService(TopologyGraphService topologyGraphService) {
+        this.topologyGraphService = topologyGraphService;
+    }
+
+    /**
+     * 注入模型连接设置持久化；测试场景未装配时保持 null，跳过保存与恢复。
+     *
+     * @param modelSettingsStore 模型设置存储
+     */
+    @Autowired(required = false)
+    public void setModelSettingsStore(ModelSettingsStore modelSettingsStore) {
+        this.modelSettingsStore = modelSettingsStore;
+    }
+
+    /**
+     * 应用启动时恢复最近一次应用的模型连接（agents-flex.model.settings-path），
+     * 免去每次重启都到「模型配置」页重新应用的重复操作。
+     */
+    @PostConstruct
+    public void restoreModelConnection() {
+        if (modelSettingsStore == null) return;
+        Map<String, Object> saved = modelSettingsStore.applied();
+        if (saved == null || saved.isEmpty()) return;
+        try {
+            UpdateModelRequest request = SETTINGS_MAPPER.convertValue(saved, UpdateModelRequest.class);
+            applyUpdateModel(request);
+            log.info("已恢复上次应用的模型连接: {}/{}", modelProperties.getProvider(), modelProperties.getModel());
+        } catch (Exception error) {
+            log.warn("恢复模型连接设置失败（沿用 application.yml 默认值）: {}", error.getMessage());
+        }
+    }
 
     private final ConcurrentMap<String, AtomicInteger> unstableAttempts =
             new ConcurrentHashMap<>();
@@ -199,6 +253,16 @@ public final class ResearchAgentFactory {
                         knowledgeNamespace))
                 .build();
 
+        // 电力拓扑图谱查询工具：走内嵌 Neo4j，按站名/设备名/线路名返回邻接关系，
+        // 适合回答“某断路器连着哪条母线”“某站有哪些出线间隔”类拓扑问题。
+        Tool topologyTool = Tool.builder("query_topology",
+                        "查询电力拓扑图谱：按变电站、设备（母线/断路器/隔离开关/主变/出线）或线路名称，返回连接关系与馈线线路")
+                .addParameter(Parameter.builder().name("query").type("string").required(true).build())
+                .function(arguments -> topologyGraphService == null
+                        ? "拓扑图谱服务未启用。"
+                        : topologyGraphService.searchForTool(String.valueOf(arguments.get("query"))))
+                .build();
+
         // 按页面选择的 Decider 与 Compressor 组合真实增量压缩，不预置虚假历史。
         ChatModel activeChatModel = modelConfiguration == null ? chatModel : modelConfiguration.buildChatModel(modelProperties);
         ChatModel activeCompressionModel = modelConfiguration == null ? compressionModel : activeChatModel;
@@ -273,10 +337,11 @@ public final class ResearchAgentFactory {
                 .version(request.getVersion())
                 .name(request.getName())
                 .description(request.getDescription())
-                .instructions(request.getInstructions())
+                .instructions(appendRenderGuideline(request.getInstructions()))
                 .chatModel(activeChatModel)
                 .chatOptions(chatOptions(modelProperties))
-                .tools(Arrays.asList(inputTool, researchTool, unstableTool, publishTool, knowledgeTool))
+                .tools(Arrays.asList(inputTool, researchTool, unstableTool, publishTool, knowledgeTool,
+                        topologyTool))
                 .toolApprovalPolicy((turn, call, tool) ->
                         Boolean.TRUE.equals(tool.getMetadata().get("sideEffect"))
                                 ? ToolApprovalDecision.requireApproval()
@@ -296,6 +361,22 @@ public final class ResearchAgentFactory {
     }
 
     /**
+     * 全局输出渲染约定：对话页按 Markdown 渲染并支持 mermaid 图表可视化，
+     * 因此要求所有 Agent 在内容存在结构化关系时优先用 mermaid 图示表达。
+     */
+    private static String appendRenderGuideline(String instructions) {
+        String guideline = "【输出渲染约定】回答一律使用 Markdown。当内容存在结构化关系"
+                + "（流程步骤、层级组成、拓扑连接路径、状态流转、时序）时，优先用一个 ```mermaid 代码块"
+                + "（flowchart LR 或 graph TD）图示表达，节点标签用中文且不要包含引号，"
+                + "同一实体在图中合并为同一节点；图示之后再补充简短的表格或文字说明关键参数。"
+                + "没有结构关系的叙述性内容才使用纯文字段落。";
+        if (instructions == null || instructions.isBlank()) {
+            return guideline;
+        }
+        return instructions + "\n\n" + guideline;
+    }
+
+    /**
      * 仅应用聊天模型连接配置到服务端内存，不构建 Agent。
      *
      * <p>页面“应用配置”可以立即让模型状态生效并反映到头部与输入框可用性上；后续创建 Agent
@@ -305,6 +386,21 @@ public final class ResearchAgentFactory {
      * @return 应用后的不含 API Key 模型状态
      */
     public synchronized Map<String, Object> applyModelConnection(UpdateModelRequest request) {
+        applyUpdateModel(request);
+        if (modelSettingsStore != null) {
+            // 保存原始请求字段快照（含空值）；恢复时按同一"非空才覆盖"语义应用
+            Map<String, Object> snapshot = SETTINGS_MAPPER.convertValue(
+                    request, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+                    });
+            modelSettingsStore.saveApplied(snapshot);
+        }
+        return modelProperties.publicView();
+    }
+
+    /**
+     * 把 UI 提交的模型连接字段应用到内存配置；未填写的字段继续沿用现有值。
+     */
+    private void applyUpdateModel(UpdateModelRequest request) {
         CreateAgentRequest carrier = new CreateAgentRequest();
         carrier.setModelProvider(request.getModelProvider());
         carrier.setModelEndpoint(request.getModelEndpoint());
@@ -329,7 +425,6 @@ public final class ResearchAgentFactory {
         if (request.getMaxTotalTokens() != null) carrier.setMaxTotalTokens(request.getMaxTotalTokens());
         if (request.getMaxAttachedTokens() != null) carrier.setMaxAttachedTokens(request.getMaxAttachedTokens());
         applyModelRequest(carrier);
-        return modelProperties.publicView();
     }
 
     /**
@@ -459,8 +554,7 @@ public final class ResearchAgentFactory {
         return messages -> {
             List<Message> compressed = delegate.compress(messages);
             for (Message message : compressed) {
-                if (message instanceof AiMessage && !((AiMessage) message).hasToolCalls()) {
-                    AiMessage aiMessage = (AiMessage) message;
+                if (message instanceof AiMessage aiMessage && !aiMessage.hasToolCalls()) {
                     aiMessage.setFullContent(aiMessage.getContent());
                 }
             }

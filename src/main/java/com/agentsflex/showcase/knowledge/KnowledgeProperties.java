@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 public class KnowledgeProperties {
 
     private String mmapPath = "./data/knowledge-mem";
+    /** embedding 设置持久化文件：最近应用的向量配置与用户自建预设。 */
+    private String settingsPath = "./data/knowledge-settings.json";
     private String searchMode = "HYBRID";
     private int topK = 5;
     private long maxUploadBytes = 2 * 1024 * 1024L;
@@ -25,6 +27,14 @@ public class KnowledgeProperties {
 
     public void setMmapPath(String mmapPath) {
         this.mmapPath = mmapPath;
+    }
+
+    public String getSettingsPath() {
+        return settingsPath;
+    }
+
+    public void setSettingsPath(String settingsPath) {
+        this.settingsPath = settingsPath;
     }
 
     public String getSearchMode() {

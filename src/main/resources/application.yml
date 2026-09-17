@@ -6,6 +6,11 @@ server:
 spring:
   application:
     name: agents-flex-agent-showcase
+  servlet:
+    multipart:
+      # 知识库快照导入（文档原文 + Base64 向量）远大于普通文档上传的 2MB 限制
+      max-file-size: 200MB
+      max-request-size: 210MB
 
 # 默认使用 DeepSeek 的 OpenAI-compatible 接口；部署环境仍可通过环境变量覆盖全部连接参数。
 # API Key 由 UI 配置或通过环境变量注入；此文件不保存任何真实密钥。
@@ -28,17 +33,26 @@ agents-flex:
     retry-enabled: ${LLM_RETRY_ENABLED:true}
     retry-count: ${LLM_RETRY_COUNT:2}
     retry-initial-delay-millis: ${LLM_RETRY_INITIAL_DELAY_MILLIS:600}
+    # 聊天模型连接设置持久化文件：重启后自动恢复最近一次应用的连接（免去重复配置）
+    settings-path: ${MODEL_SETTINGS_PATH:./data/model-settings.json}
   persistence:
     duckdb-url: ${DUCKDB_URL:jdbc:duckdb:./data/showcase.duckdb}
   # RAG 知识库：RogueMemory mmap 目录、默认检索模式与 TopK；embedding 可用环境变量提供默认值。
+  # settings-path 保存最近应用的向量模型配置与用户自建预设，重启后自动恢复。
   knowledge:
     mmap-path: ${KNOWLEDGE_MMAP_PATH:./data/knowledge-mem}
+    settings-path: ${KNOWLEDGE_SETTINGS_PATH:./data/knowledge-settings.json}
     search-mode: ${KNOWLEDGE_SEARCH_MODE:HYBRID}
     top-k: ${KNOWLEDGE_TOP_K:5}
     max-upload-bytes: ${KNOWLEDGE_MAX_UPLOAD_BYTES:2097152}
     embedding-endpoint: ${EMBEDDING_ENDPOINT:}
     embedding-api-key: ${EMBEDDING_API_KEY:}
     embedding-model: ${EMBEDDING_MODEL:bge-m3}
+  # 内嵌 Neo4j 电力拓扑图谱：启动时从知识库文档自动导入，/api/graph/* 查询。
+  graph:
+    store-path: ${NEO4J_STORE_PATH:./data/neo4j}
+    # 页面缓存容量（k/m/g 后缀）；留空使用 Neo4j 默认值
+    page-cache-size: ${NEO4J_PAGE_CACHE:}
 
 logging:
   level:

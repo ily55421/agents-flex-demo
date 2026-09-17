@@ -1,12 +1,12 @@
 package com.agentsflex.showcase.model;
 
-import javax.validation.constraints.DecimalMax;
-import javax.validation.constraints.DecimalMin;
-import javax.validation.constraints.Max;
-import javax.validation.constraints.Min;
-import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.Pattern;
-import javax.validation.constraints.Size;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
@@ -273,7 +273,7 @@ public class CreateAgentRequest {
      */
     @Min(0)
     @Max(1000)
-    private int maxToolCalls = 8;
+    private int maxToolCalls = 100;
 
     /**
      * 单个 Agent Turn 从创建到结束允许持续的最长时间，单位毫秒，{@code 0} 表示不限制总时长。

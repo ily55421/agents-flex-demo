@@ -19,6 +19,8 @@ public class ModelProperties {
     private String endpoint = "https://api.openai.com";
     private String requestPath = "/v1/chat/completions";
     private String apiKey;
+    /** 模型连接设置持久化文件：重启后自动恢复最近一次应用的连接配置 */
+    private String settingsPath = "./data/model-settings.json";
     private String model = "gpt-4o-mini";
     private float temperature = 0.2f;
     private boolean thinkingEnabled;
@@ -74,6 +76,20 @@ public class ModelProperties {
      */
     public void setRequestPath(String requestPath) {
         this.requestPath = requestPath;
+    }
+
+    /**
+     * @return 模型连接设置持久化文件路径
+     */
+    public String getSettingsPath() {
+        return settingsPath;
+    }
+
+    /**
+     * @param settingsPath 设置文件路径
+     */
+    public void setSettingsPath(String settingsPath) {
+        this.settingsPath = settingsPath;
     }
 
     /**

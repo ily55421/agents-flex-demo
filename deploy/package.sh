@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# 一键打包：前端构建产物拷入后端资源目录，产出可直接部署的单可执行 jar。
+# 产物: target/agents-flex-demo-1.0.0-SNAPSHOT.jar（部署时与 data/ 目录同级放置）
+# 用法: ./deploy/package.sh   （需 JDK 21 + Maven + Node/pnpm）
+set -e
+cd "$(dirname "$0")/.."
+
+echo "[1/3] 构建前端 ..."
+if [ ! -d frontend/node_modules ]; then
+  (cd frontend && pnpm install)
+fi
+(cd frontend && pnpm build)
+
+echo "[2/3] 前端产物拷入 jar 静态资源目录 ..."
+rm -rf src/main/resources/static
+mkdir -p src/main/resources/static
+cp -r frontend/dist/. src/main/resources/static/
+
+echo "[3/3] 打包后端 fat jar ..."
+mvn -B -DskipTests package
+
+echo
+echo "打包完成: target/agents-flex-demo-1.0.0-SNAPSHOT.jar"
+echo "部署方式: 将 jar 与 data/ 目录放在同一目录，执行 java -jar agents-flex-demo-1.0.0-SNAPSHOT.jar"
+echo "  - data/showcase.duckdb         Agent 定义 / 会话归档 / 知识库文档（必须迁移，否则为空库）"
+echo "  - data/model-settings.json     聊天模型连接（免重新配置主模型）"
+echo "  - data/knowledge-settings.json 向量模型配置（可选）"
+echo "  - data/neo4j/                  图数据库存储（可选，缺省自动重建）"
+echo "  - data/knowledge-mem*          知识库索引缓存（可选，启动时自动从 DuckDB 重建）"

@@ -9,6 +9,8 @@ const props = defineProps<{
   open: boolean
   model: ModelProfile
   embedding: EmbeddingProfile
+  /** standalone=true 时作为独立页面内嵌渲染：无遮罩、无关闭/取消按钮（关闭由页面导航完成）。 */
+  standalone?: boolean
 }>()
 const emit = defineEmits<{
   close: []
@@ -186,7 +188,25 @@ function apply() {
 
 /** 立即把当前向量草稿应用到知识库（不等创建 Agent），用于独立调试 embedding。 */
 function configureEmbeddingNow() {
-  emit('configureEmbedding', {...draftEmbedding})
+  const profile = {...draftEmbedding}
+  autoSaveEmbeddingProfile(profile)
+  emit('configureEmbedding', profile)
+}
+
+/**
+ * 应用前自动把当前向量配置纳入“我的档案”，使自定义配置出现在档案下拉中可复用；
+ * 用户已输入档案名称时优先使用，否则按模型名自动命名。
+ */
+function autoSaveEmbeddingProfile(profile: EmbeddingProfile) {
+  const name = draftName.value.trim() || `自定义 ${profile.embeddingModel || '向量模型'}`
+  const data = {...profile, profileName: name}
+  const index = userProfiles.value.findIndex((stored) =>
+      stored.profileType === 'embedding' && (stored.data as ModelProfile).profileName === name)
+  if (index >= 0) userProfiles.value[index] = {profileType: 'embedding', data}
+  else userProfiles.value.push({profileType: 'embedding', data})
+  persistUserProfiles()
+  selectedEmbeddingProfile.value = name
+  draftName.value = ''
 }
 
 function close() {
@@ -195,12 +215,13 @@ function close() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="props.open" class="dialog-overlay" @click.self="close">
+  <Teleport to="body" :disabled="props.standalone">
+    <div v-if="props.open" :class="props.standalone ? 'standalone-shell' : 'dialog-overlay'"
+         @click.self="!props.standalone && close()">
       <section class="model-dialog" role="dialog" aria-modal="true" aria-label="模型配置">
         <header class="dialog-header">
           <h2><IconSettings :size="18"/>模型配置</h2>
-          <button class="dialog-close" type="button" aria-label="关闭" @click="close"><IconX :size="18"/></button>
+          <button v-if="!props.standalone" class="dialog-close" type="button" aria-label="关闭" @click="close"><IconX :size="18"/></button>
         </header>
 
         <nav class="dialog-tabs" role="tablist">
@@ -414,7 +435,7 @@ function close() {
                     @click="saveProfile"><IconDeviceFloppy :size="15"/>保存档案</button>
           </div>
           <div class="dialog-actions">
-            <button class="secondary-button" type="button" @click="close">取消</button>
+            <button v-if="!props.standalone" class="secondary-button" type="button" @click="close">取消</button>
             <button class="primary-button" type="button" @click="apply">应用配置</button>
           </div>
         </footer>
@@ -433,6 +454,19 @@ function close() {
   justify-content: center;
   z-index: 60;
   padding: 24px;
+}
+
+/* standalone 页面模式：无遮罩，卡片随页面容器自适应铺开。 */
+.standalone-shell {
+  display: block;
+}
+
+.standalone-shell .model-dialog {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  box-shadow: none;
+  border: 1px solid #e5e7eb;
 }
 
 .model-dialog {

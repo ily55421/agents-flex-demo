@@ -60,6 +60,13 @@ code, pre, .native-label, .interaction-kicker, .run-reference, .runtime-identifi
 .page-tabs button.active { color: var(--accent); background: var(--surface-2); border-color: var(--border); position: relative; top: 1px; }
 .chat-shell { width: min(100%, 1500px); height: 100%; min-height: 0; margin: 0 auto; padding: 14px 18px; display: flex; flex-direction: column; }
 .knowledge-shell { width: min(100%, 1100px); height: 100%; min-height: 0; margin: 0 auto; padding: 14px 18px; display: flex; flex-direction: column; overflow-y: auto; }
+/* Agent 维护页：左创建表单 + 右已创建清单。 */
+.workshop-shell { width: min(100%, 1500px); height: 100%; min-height: 0; margin: 0 auto; padding: 14px 18px; display: flex; flex-direction: column; overflow: visible; }
+/* 模型配置独立维护页。 */
+.models-shell { width: min(100%, 900px); height: 100%; min-height: 0; margin: 0 auto; padding: 14px 18px; display: flex; flex-direction: column; }
+/* 图谱页：暗色岛占满内容区，不留亮色留白。 */
+.graph-tab-shell { height: 100%; min-height: 0; padding: 12px 18px 14px; display: flex; }
+.graph-tab-shell > * { flex: 1; min-height: 0; }
 /* 左栏模型配置摘要卡片（配置入口在弹窗） */
 .model-config-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
 .model-config-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -532,4 +539,17 @@ textarea:focus, input:focus, select:focus { border-color: var(--accent); box-sha
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* 流式 Markdown：光标附着到内容最后一个块元素末尾（style.css 为全局样式，无需 :deep）。 */
+.md-streaming .md-body > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  margin-left: 4px;
+  vertical-align: -2px;
+  background: var(--accent);
+  border-radius: 1.5px;
+  animation: caret-blink .8s steps(1) infinite;
 }

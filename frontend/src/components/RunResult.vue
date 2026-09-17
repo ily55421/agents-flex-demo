@@ -2,6 +2,7 @@
 import {computed} from 'vue'
 import { IconCircleCheck, IconExclamationCircle } from '@tabler/icons-vue'
 import type { AgentRun } from '@/types/agent'
+import MarkdownView from '@/components/MarkdownView.vue'
 
 const props = defineProps<{ run: AgentRun }>()
 
@@ -18,7 +19,9 @@ const retrySummary = computed(() => {
     <IconExclamationCircle v-else :size="25" :stroke-width="1.8" />
     <div>
       <strong>{{ run.status === 'COMPLETED' ? 'Agent Run 已完成' : run.status }}</strong>
-      <p>{{ run.finalOutput || run.error || run.budgetExceededReason }}</p>
+      <!-- 完成输出按 Markdown 渲染；错误与预算提示保持纯文本，避免符号被误解为标记。 -->
+      <MarkdownView v-if="run.finalOutput" :content="run.finalOutput"/>
+      <p v-else>{{ run.error || run.budgetExceededReason }}</p>
       <small v-if="retrySummary" class="result-retry-summary">{{ retrySummary }}</small>
     </div>
   </section>

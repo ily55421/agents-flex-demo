@@ -43,8 +43,8 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -112,8 +112,8 @@ public class ShowcaseRuntime {
         if (archive == null) return;
         for (Map<String, Object> view : archive.loadAgentDefinitions()) {
             Object agentId = view.get("agentId");
-            if (agentId instanceof String) {
-                archivedAgents.put((String) agentId, view);
+            if (agentId instanceof String string) {
+                archivedAgents.put(string, view);
             }
         }
     }
@@ -130,7 +130,7 @@ public class ShowcaseRuntime {
         if (request.getInitialDelayMillis() > request.getMaxDelayMillis()) {
             throw new IllegalArgumentException("最大重试间隔不能小于初始重试间隔");
         }
-        String agentId = "showcase-agent-" + UUID.randomUUID();
+        String agentId = "showcase-agent-" + definitionFingerprint(request.getName(), request.getVersion());
         InMemoryCompressionStateStore compressionStore = new InMemoryCompressionStateStore();
         Agent agent = agentFactory.create(agentId, request, compressionStore);
         // API Key 已固化进该 Agent 的 ChatModel；配置快照无需继续持有或回显密钥。
@@ -142,6 +142,24 @@ public class ShowcaseRuntime {
             archivedAgents.put(agentId, definition.toView());
         }
         return definition.toView();
+    }
+
+    /**
+     * 同名同版本确定性派生 agentId：归档 Agent 重建（重启后自动恢复、页面重复提交）
+     * 会命中同一行定义做幂等覆盖，而不是每次都新增一行归档副本；
+     * 需要迭代配置时应递增版本号，不同版本各自独立。
+     */
+    private static String definitionFingerprint(String name, Object version) {
+        try {
+            java.security.MessageDigest digest =
+                    java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(
+                    (String.valueOf(name) + "#v" + String.valueOf(version))
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(hash, 0, 6);
+        } catch (java.security.NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 不可用", error);
+        }
     }
 
     /**
@@ -692,7 +710,7 @@ public class ShowcaseRuntime {
      * @return Number 的 int 值，非数值统一返回 0
      */
     private static int number(Object value) {
-        return value instanceof Number ? ((Number) value).intValue() : 0;
+        return value instanceof Number n ? n.intValue() : 0;
     }
 
     /**

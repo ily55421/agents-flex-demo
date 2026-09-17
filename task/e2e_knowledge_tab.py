@@ -42,7 +42,7 @@ with sync_playwright() as p:
     print('[3] 检索范围下拉: OK（全部文档 + 各站点文档）')
 
     # 4. 批量导入按钮存在（在“添加知识”折叠组内）
-    page.locator('.knowledge-add summary').click()
+    page.locator('.knowledge-add summary', has_text='添加知识').click()
     page.wait_for_timeout(300)
     assert page.get_by_role('button', name='批量导入').count() == 1, '批量导入按钮缺失'
     print('[4] 批量导入按钮: OK')

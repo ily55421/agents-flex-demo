@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.7.18</version>
+        <version>3.5.16</version>
         <relativePath/>
     </parent>
 
@@ -17,9 +17,27 @@
     <name>Agents-Flex Agent Runtime Showcase</name>
 
     <properties>
-        <java.version>1.8</java.version>
+        <java.version>21</java.version>
         <agents-flex.version>2.2.9</agents-flex.version>
     </properties>
+
+    <!-- 统一 eclipse-collections 版本：内嵌 Neo4j 5.26 需要 11.1.0（9.2.0 缺少
+         ImmutableByteObjectMapFactory.from 等 API），RogueMemory 传递依赖 9.2.0 会仲裁胜出。
+         11.x 对 RogueMemory 用到的 9.x API 保持二进制兼容（子模块测试与恢复路径测试已验证）。 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.eclipse.collections</groupId>
+                <artifactId>eclipse-collections</artifactId>
+                <version>11.1.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.collections</groupId>
+                <artifactId>eclipse-collections-api</artifactId>
+                <version>11.1.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -35,6 +53,9 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-cache</artifactId>
         </dependency>
+        <!-- Ehcache 3 JCache：JCache 规范未改名（仍是 javax.cache），使用默认（无 classifier）jar。
+             不要加 jakarta classifier：那是 jakarta.cache SPI 变体，会导致
+             javax.cache.spi.CachingProvider 查找失败、启动即抛异常 -->
         <dependency>
             <groupId>org.ehcache</groupId>
             <artifactId>ehcache</artifactId>
@@ -56,18 +77,26 @@
         <dependency>
             <groupId>org.duckdb</groupId>
             <artifactId>duckdb_jdbc</artifactId>
-            <version>0.9.2</version>
+            <version>1.5.5.1</version>
         </dependency>
         <!-- RogueMemory 嵌入式 AI 记忆层：HNSW 向量 + BM25 混合检索，mmap 持久化，零第三方依赖 -->
+        <!-- 1.1.7-patch2：本项目子模块 RogueMemory/（源码仓库 bryan31/RogueMap 补丁分支）本地构建，
+             修复 Windows 上恢复扫描索引 blob、并发读写 mmap 导致的 JVM 原生崩溃，务必使用本地构建版本 -->
         <dependency>
             <groupId>com.yomahub</groupId>
             <artifactId>roguemap-memory</artifactId>
-            <version>1.1.5</version>
+            <version>1.1.7-patch2</version>
         </dependency>
         <dependency>
             <groupId>com.yomahub</groupId>
             <artifactId>roguemap-embedding</artifactId>
-            <version>1.1.5</version>
+            <version>1.1.7-patch2</version>
+        </dependency>
+        <!-- 内嵌 Neo4j 图数据库：电力拓扑图谱（5.26 LTS 支持 Java 17/21，slf4j 2.x 与 Boot 3.5 对齐） -->
+        <dependency>
+            <groupId>org.neo4j</groupId>
+            <artifactId>neo4j</artifactId>
+            <version>5.26.30</version>
         </dependency>
         <dependency>
             <groupId>com.agentsflex</groupId>

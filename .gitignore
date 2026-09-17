@@ -17,3 +17,17 @@ data/
 .superpowers/
 
 *.log
+src/main/resources/static/
+
+# 本地工具状态（Codely CLI 会话存档与设置）
+.codely-cli/
+
+# 打包运行时：内嵌 JRE 与离线安装包体积过大，由部署脚本按需下载
+runtime/
+deploy/runtime/
+
+# 知识库向量同步包（跨环境迁移用数据产物体积大）
+knowledge-vector-sync-*.tar.gz
+
+# 构建调试产物：javac classpath 转储
+cp11.txt

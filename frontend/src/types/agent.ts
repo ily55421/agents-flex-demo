@@ -339,6 +339,22 @@ export interface EmbeddingProfile {
 
 export type KnowledgeSearchMode = 'HYBRID' | 'VECTOR_ONLY' | 'KEYWORD_ONLY'
 
+// SavedEmbedding 是后端持久化的最近一次应用向量配置；重启后自动恢复并回填表单。
+export interface SavedEmbedding {
+  endpoint: string
+  apiKey: string
+  model: string
+  searchMode: KnowledgeSearchMode
+}
+
+// EmbeddingPreset 是用户自建的向量模型预设，存后端设置文件，重启后仍可复用。
+export interface EmbeddingPreset {
+  name: string
+  endpoint: string
+  model: string
+  apiKey: string
+}
+
 export interface KnowledgeStatus {
   ready: boolean
   searchMode: KnowledgeSearchMode
@@ -353,6 +369,7 @@ export interface KnowledgeStatus {
   seeded: boolean
   lastError: string | null
   mmapPath: string
+  savedEmbedding: SavedEmbedding | null
 }
 
 export interface KnowledgeDocument {
@@ -375,6 +392,16 @@ export interface KnowledgeHit {
   mode: KnowledgeSearchMode
 }
 
+/** 知识库快照导入结果：文档与向量的合并计数及索引刷新状态。 */
+export interface KnowledgeSyncResult {
+  documentsUpserted: number
+  documentsAdded: number
+  vectorsAdded: number
+  vectorsSkipped: number
+  indexRefreshed: boolean
+  lastError: string | null
+}
+
 // SessionSummary 是同一 conversationId 的全部 Turn 在会话列表中的聚合摘要。
 export interface SessionSummary {
   conversationId: string
@@ -385,4 +412,104 @@ export interface SessionSummary {
   updatedAt: number
   turns: number
   active: boolean
+}
+
+// ---------- 电力拓扑本体图谱 ----------
+
+/** 图谱实例节点：URI、本体类别、标签、所属站、电压、别名与属性。 */
+export interface GraphNode {
+  id: string
+  cls: string
+  label: string
+  station: string | null
+  voltage: string | null
+  aliases: string[]
+  attrs: Record<string, unknown>
+}
+
+/** 图谱实例关系：源 URI、谓词、目标 URI。 */
+export interface GraphEdge {
+  s: string
+  p: string
+  o: string
+}
+
+/** 本体类层级（TBox）节点。 */
+export interface TBoxNode {
+  id: string
+  l: string
+  en: string
+  parent: string | null
+}
+
+/** 本体类层级（TBox）关系：pc 为谓词中文名。 */
+export interface TBoxEdge {
+  s: string
+  p: string
+  pc: string
+  o: string
+}
+
+/** /api/graph/view 返回的画布全量数据。 */
+export interface GraphView {
+  meta: { ns: string; inst: string; predCn: Record<string, string> }
+  tbox: { nodes: TBoxNode[]; edges: TBoxEdge[] }
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
+/** 图谱统计摘要。 */
+export interface GraphSummary {
+  source: string
+  sourceHash: string
+  hashMatch: boolean
+  importedAt: string | null
+  entities: number
+  edges: number
+  tboxClasses: number
+  tboxEdges: number
+  stations: number
+  archiveStations: number
+  archiveFacts: number
+  byClass: Record<string, number>
+  byPredicate: Record<string, number>
+}
+
+/** 站点清单行：图谱实体计数 + 档案概要。 */
+export interface GraphStation {
+  name: string
+  baseVoltage: string
+  summary: Record<string, unknown>
+  entities?: number
+  classCounts?: Record<string, number>
+}
+
+/** 邻接条目（节点详情面板）。 */
+export interface GraphNeighbor {
+  id: string
+  label: string
+  cls: string
+  clsCn: string
+}
+
+/** /api/graph/node 返回的节点详情。 */
+export interface GraphNodeDetail {
+  node: GraphNode
+  outgoing: Record<string, GraphNeighbor[]>
+  incoming: Record<string, GraphNeighbor[]>
+}
+
+/** 知识问答事实行。 */
+export interface GraphFactRow {
+  seq: number
+  station: string
+  category: string
+  text: string
+}
+
+/** /api/graph/facts 返回。 */
+export interface GraphFactsResult {
+  total: number
+  rows: GraphFactRow[]
+  categories: { category: string; count: number }[]
 }

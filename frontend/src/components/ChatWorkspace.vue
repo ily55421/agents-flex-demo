@@ -3,6 +3,7 @@ import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue'
 import {IconBrain, IconChartBar, IconSearch, IconSend2, IconShieldCheck, IconTimeline, IconTool} from '@tabler/icons-vue'
 import type {AgentRun, ModelStatus, TraceView} from '@/types/agent'
 import TraceViewer from '@/components/TraceViewer.vue'
+import MarkdownView from '@/components/MarkdownView.vue'
 
 const props = defineProps<{
   run: AgentRun | null
@@ -37,8 +38,8 @@ const headerStatistics = computed(() => props.run ? [
 ] : [])
 /** 根据缺失前置条件和 Turn 状态给出准确的输入框提示。 */
 const composerPlaceholder = computed(() => {
-  if (!props.model?.configured) return '请先点击左侧「⚙ 配置模型」应用模型配置'
-  if (!props.agentReady) return '模型已就绪，点击左侧「创建 Agent」后即可输入对话'
+  if (!props.model?.configured) return '请先到顶部「模型配置」页应用模型连接'
+  if (!props.agentReady) return '模型已就绪，在左侧选择或到「Agent 维护」页创建 Agent 后即可输入对话'
   if (props.busy) return '正在处理请求...'
   if (props.run && !isTerminal.value) return '当前 Turn 完成后可以继续追问'
   return props.run ? '继续追问...' : '输入你希望 AI Agent 完成的任务...'
@@ -153,8 +154,8 @@ onBeforeUnmount(() => {
             研究并申请发布（触发审批）
           </button>
         </div>
-        <p v-else-if="model?.configured">在左侧配置 Agent 的指令、执行策略、预算、重试与压缩参数，点击「创建 Agent」后即可对话。</p>
-        <p v-else>请点击左侧「⚙ 配置模型」填写模型连接（本地 Ollama / 内网网关无需 API Key），应用后点击「创建 Agent」即可开始对话；配置会从当前浏览器自动恢复。</p>
+        <p v-else-if="model?.configured">在左侧选择一个 Agent；若还没有，到顶部「Agent 维护」页配置指令、执行策略、预算、重试与压缩参数并创建。</p>
+        <p v-else>请到顶部「模型配置」页填写模型连接（本地 Ollama / 内网网关无需 API Key）并应用，然后到「Agent 维护」页创建 Agent 即可开始对话。</p>
       </div>
 
       <template v-for="(message, index) in run?.messages ?? []" :key="message.id || index">
@@ -172,7 +173,9 @@ onBeforeUnmount(() => {
               <summary>查看模型思考过程</summary>
               <p>{{ message.reasoning }}</p>
             </details>
-            <p v-if="message.content">{{ message.content }}</p>
+            <!-- 助手消息按 Markdown 渲染（含 mermaid 图表）；用户与工具消息保持纯文本。 -->
+            <MarkdownView v-if="message.content && message.role === 'assistant'" :content="message.content"/>
+            <p v-else-if="message.content">{{ message.content }}</p>
             <div v-for="tool in message.toolCalls" :key="tool.id" class="tool-call-row">
               <IconTool :size="15"/>
               <span>调用 {{ tool.name }}</span><code>{{ JSON.stringify(tool.arguments) }}</code>
@@ -190,7 +193,9 @@ onBeforeUnmount(() => {
           <details v-if="streamingReasoning" class="reasoning-block" open>
             <summary>模型正在思考</summary>
             <p>{{ streamingReasoning }}</p></details>
-          <p v-if="streamingText" class="streaming-content">{{ streamingText }}<span class="stream-caret"/></p>
+          <div v-if="streamingText" class="streaming-content md-streaming">
+            <MarkdownView :content="streamingText" streaming/>
+          </div>
           <div v-else class="typing-dots"><i/><i/><i/></div>
         </div>
       </article>

@@ -1,25 +1,28 @@
 <script setup lang="ts">
 import {computed, onMounted, ref} from 'vue'
 import {storeToRefs} from 'pinia'
-import {IconDatabase, IconMessages, IconRefresh, IconSettings} from '@tabler/icons-vue'
+import {IconAdjustmentsHorizontal, IconDatabase, IconMessages, IconRefresh, IconRobot, IconSitemap} from '@tabler/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
+import AgentPicker from '@/components/AgentPicker.vue'
+import AgentWorkshop from '@/components/AgentWorkshop.vue'
 import ApprovalPanel from '@/components/ApprovalPanel.vue'
 import BudgetPanel from '@/components/BudgetPanel.vue'
 import CapabilityMap from '@/components/CapabilityMap.vue'
-import ChatHome from '@/components/ChatHome.vue'
 import ChatWorkspace from '@/components/ChatWorkspace.vue'
 import CompressionPanel from '@/components/CompressionPanel.vue'
 import DynamicForm from '@/components/DynamicForm.vue'
 import EventStream from '@/components/EventStream.vue'
+import GraphExplorer from '@/components/GraphExplorer.vue'
 import KnowledgePanel from '@/components/KnowledgePanel.vue'
+import KnowledgeScopeCard from '@/components/KnowledgeScopeCard.vue'
+import ModelConfigPage from '@/components/ModelConfigPage.vue'
 import RetryPanel from '@/components/RetryPanel.vue'
 import RunControls from '@/components/RunControls.vue'
 import RunResult from '@/components/RunResult.vue'
 import SessionPanel from '@/components/SessionPanel.vue'
-import TaskComposer from '@/components/TaskComposer.vue'
 import {useAgentRun} from '@/composables/useAgentRun'
 import {knowledgeApi} from '@/api/agent'
-import type {CreateAgentPayload, EmbeddingProfile, JsonSchema, ModelProfile} from '@/types/agent'
+import type {AgentDefinition, CreateAgentPayload, EmbeddingProfile, JsonSchema, ModelProfile} from '@/types/agent'
 
 const store = useAgentRun()
 const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, error, connectionState, sessions} = storeToRefs(store)
@@ -27,16 +30,20 @@ const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, 
 /** 知识库面板实例；应用向量配置后主动刷新状态，避免用户看到过期的“未配置”。 */
 const knowledgePanel = ref<{ reload: () => Promise<void> } | null>(null)
 
-/** 顶部页面 Tab：Agent 工作台（默认）/ 知识库 / 纯对话；?view= 可直接定位。 */
-const activeTab = ref<'workspace' | 'knowledge' | 'chat'>(
+/**
+ * 顶部页面 Tab：Agent 对话（默认）/ Agent 维护 / 模型配置 / 知识库 / 图谱。
+ * 旧链接的 ?view=chat（纯对话）已并入对话页，回退到默认页。
+ */
+type PageTab = 'workspace' | 'agents' | 'models' | 'knowledge' | 'graph'
+const activeTab = ref<PageTab>(
     (() => {
       const view = new URL(window.location.href).searchParams.get('view')
-      return view === 'chat' ? 'chat' : view === 'knowledge' ? 'knowledge' : 'workspace'
+      return view === 'agents' || view === 'models' || view === 'knowledge' || view === 'graph' ? view : 'workspace'
     })(),
 )
 
 /** 切换页面时同步 URL 的 view 参数（replaceState 不产生历史记录）。 */
-function switchTab(tab: 'workspace' | 'knowledge' | 'chat') {
+function switchTab(tab: PageTab) {
   activeTab.value = tab
   const url = new URL(window.location.href)
   tab === 'workspace' ? url.searchParams.delete('view') : url.searchParams.set('view', tab)
@@ -56,7 +63,7 @@ function perform(action: () => Promise<void>) {
   void action().catch(() => undefined)
 }
 
-/** 提交左侧完整配置；后端真实 Agent 创建成功后聊天输入才会解锁。 */
+/** 提交 Agent 维护页的完整配置；后端真实 Agent 创建成功后聊天输入才会解锁。 */
 function createAgent(configuration: CreateAgentPayload) {
   perform(() => store.createAgent(configuration))
 }
@@ -78,9 +85,33 @@ function configureEmbedding(profile: EmbeddingProfile) {
   })
 }
 
-/** 把弹窗中的聊天模型连接同步到后端，让模型状态与输入框可用性立即生效。 */
+/** 把聊天模型连接同步到后端运行时，让模型状态与输入框可用性立即生效。 */
 function applyModel(profile: ModelProfile) {
   perform(() => store.applyModelConfiguration(profile))
+}
+
+/** 对话页选择 Agent：切换到不同 Agent 时清空当前对话窗口（历史会话仍保留）。 */
+function pickAgent(definition: AgentDefinition) {
+  if (run.value && run.value.agent?.agentId !== definition.agentId) {
+    if (!window.confirm('切换 Agent 会清空当前对话窗口（历史会话仍可从左侧重新打开）。继续？')) return
+    store.reset()
+  }
+  store.selectAgent(definition)
+}
+
+/** 从维护页跳回对话页：可选携带要对话的 Agent。 */
+function goChat(definition: AgentDefinition | null) {
+  if (definition && definition.agentId !== agent.value?.agentId) pickAgent(definition)
+  switchTab('workspace')
+}
+
+/** 对话页左下角切换检索范围：以当前 Agent 配置 + 新范围重建运行对象。 */
+function changeKnowledgeScope(docId: string) {
+  const current = agent.value
+  if (!current) return
+  perform(async () => {
+    await store.recreateAgent({...current, knowledgeNamespace: docId})
+  })
 }
 
 /** 将聊天输入创建为 READY Run 并立即启动，用户不需要理解两阶段 Runtime 命令。 */
@@ -89,6 +120,10 @@ async function send(message: string) {
     if (run.value && store.isTerminal) {
       await store.continueConversation(message)
     } else {
+      if (!agent.value) return
+      // 历史归档 Agent（服务重启后运行对象未重建）在发送时自动重建：
+      // 免密钥服务全程无感；需要密钥的服务由后端报错引导到「Agent 维护」页。
+      if (agent.value.runnable === false) await store.recreateAgent(agent.value)
       if (!agent.value) return
       await store.create({agentId: agent.value.agentId, task: message})
       await store.start()
@@ -109,27 +144,34 @@ onMounted(() => {
     <AppHeader :run="run" :connection-state="connectionState"/>
     <nav class="page-tabs" aria-label="页面切换">
       <button type="button" :class="{active: activeTab === 'workspace'}" @click="switchTab('workspace')">
-        <IconSettings :size="16"/>Agent 工作台
+        <IconMessages :size="16"/>Agent 对话
+      </button>
+      <button type="button" :class="{active: activeTab === 'agents'}" @click="switchTab('agents')">
+        <IconRobot :size="16"/>Agent 维护
+      </button>
+      <button type="button" :class="{active: activeTab === 'models'}" @click="switchTab('models')">
+        <IconAdjustmentsHorizontal :size="16"/>模型配置
       </button>
       <button type="button" :class="{active: activeTab === 'knowledge'}" @click="switchTab('knowledge')">
         <IconDatabase :size="16"/>知识库
       </button>
-      <button type="button" :class="{active: activeTab === 'chat'}" @click="switchTab('chat')">
-        <IconMessages :size="16"/>纯对话
+      <button type="button" :class="{active: activeTab === 'graph'}" @click="switchTab('graph')">
+        <IconSitemap :size="16"/>图谱
       </button>
     </nav>
 
+    <!-- Agent 对话页：左侧会话历史 + Agent 选择，中间对话区，右侧事件流。 -->
     <main v-if="activeTab === 'workspace'" id="main-content" class="dashboard-shell">
       <aside class="left-rail">
+        <AgentPicker :agent="agent" :busy="busy" @select="pickAgent"
+                     @go-workshop="switchTab('agents')" @go-models="switchTab('models')"/>
         <SessionPanel :sessions="sessions" :current-conversation-id="run?.conversationId ?? null" :busy="busy"
                       @new-session="store.newSession" @open="(runId) => perform(() => store.openRun(runId))"/>
-        <TaskComposer :busy="busy" :disabled="Boolean(run)" :agent="agent" :show-reset="store.isTerminal"
-                      @create="createAgent" @reset="store.reset" @configure-embedding="configureEmbedding"
-                      @apply-model="applyModel"/>
         <RunControls v-if="run" :run="run" :busy="busy" @start="perform(store.start)"
                      @suspend="perform(store.suspend)" @resume="perform(store.resume)"
                      @cancel="perform(store.cancel)" @refresh="perform(store.refresh)" @reset="store.reset"/>
         <CapabilityMap v-if="run" :capabilities="run.capabilities"/>
+        <KnowledgeScopeCard :agent="agent" :busy="busy" @change="changeKnowledgeScope"/>
       </aside>
 
       <section class="workspace-column">
@@ -164,12 +206,24 @@ onMounted(() => {
       <aside class="right-rail"><EventStream :events="run?.events ?? []"/></aside>
     </main>
 
-    <main v-else-if="activeTab === 'knowledge'" class="knowledge-shell">
-      <KnowledgePanel ref="knowledgePanel"/>
+    <!-- Agent 维护页：创建/重新配置 Agent，查看已创建清单并跳转对话。 -->
+    <main v-else-if="activeTab === 'agents'" id="main-content" class="workshop-shell">
+      <AgentWorkshop :agent="agent" :busy="busy" @create="createAgent" @go-chat="goChat"
+                     @configure-embedding="configureEmbedding" @apply-model="applyModel"/>
     </main>
 
-    <main v-else class="chat-shell">
-      <ChatHome @go-to-workspace="switchTab('workspace')"/>
+    <!-- 模型配置页：聊天模型与向量模型的独立维护入口。 -->
+    <main v-else-if="activeTab === 'models'" id="main-content" class="models-shell">
+      <ModelConfigPage :model-status="modelStatus" @apply="applyModel"
+                       @configure-embedding="configureEmbedding" @go-knowledge="switchTab('knowledge')"/>
+    </main>
+
+    <main v-else-if="activeTab === 'graph'" class="graph-tab-shell">
+      <GraphExplorer/>
+    </main>
+
+    <main v-else class="knowledge-shell">
+      <KnowledgePanel ref="knowledgePanel"/>
     </main>
 
     <div v-if="error" class="error-toast" role="alert"><span>{{ error }}</span><button type="button" @click="store.clearError">关闭</button></div>

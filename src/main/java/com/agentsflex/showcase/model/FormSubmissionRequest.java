@@ -1,6 +1,6 @@
 package com.agentsflex.showcase.model;
 
-import javax.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotEmpty;
 import java.util.LinkedHashMap;
 import java.util.Map;
 

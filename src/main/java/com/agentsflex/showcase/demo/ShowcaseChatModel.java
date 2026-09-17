@@ -154,8 +154,8 @@ public final class ShowcaseChatModel extends BaseChatModel<BaseChatConfig> {
     private static ToolMessage lastToolMessage(Prompt prompt) {
         ToolMessage last = null;
         for (Message message : prompt.getMessages()) {
-            if (message instanceof ToolMessage) {
-                last = (ToolMessage) message;
+            if (message instanceof ToolMessage toolMessage) {
+                last = toolMessage;
             }
         }
         return last;
