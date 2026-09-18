@@ -11,6 +11,7 @@ import type {
     GraphView,
     ChunkPreviewItem,
     IngestTask,
+    KnowledgeBase,
     KnowledgeDocument,
     KnowledgeHit,
     KnowledgeSearchMode,
@@ -136,11 +137,12 @@ export const knowledgeApi = {
                 method: 'POST',
                 body: JSON.stringify({content, chunkSize, overlap}),
             }),
-    /** 上传文件并异步入库：立即返回任务视图，进度经 tasks() 轮询。 */
-    uploadDocumentAsync: async (file: File, title?: string): Promise<IngestTask> => {
+    /** 上传文件并异步入库：立即返回任务视图，进度经 tasks() 轮询；kbId 指定目标库。 */
+    uploadDocumentAsync: async (file: File, title?: string, kbId?: string): Promise<IngestTask> => {
         const form = new FormData()
         form.append('file', file)
         if (title) form.append('title', title)
+        if (kbId && kbId !== 'all') form.append('kbId', kbId)
         const response = await fetch(`${KNOWLEDGE_API_ROOT}/documents/upload/async`,
             {method: 'POST', body: form})
         if (!response.ok) {
@@ -164,12 +166,25 @@ export const knowledgeApi = {
     /** 删除文档（RogueMemory namespace + DuckDB 元数据）。 */
     deleteDocument: (docId: string) =>
         request<{ deleted: boolean; docId: string }>(KNOWLEDGE_API_ROOT, `/documents/${docId}`, {method: 'DELETE'}),
-    /** 检索测试：返回 TopK 命中片段与生效模式；namespace 可限定单文档。 */
-    search: (query: string, topK: number, namespace?: string) =>
-        request<{ query: string; namespace: string; hits: KnowledgeHit[] }>(KNOWLEDGE_API_ROOT, '/search', {
+    /** 检索测试：kbId 优先于 namespace（文档范围）；两者都缺省为全库检索。 */
+    search: (query: string, topK: number, namespace?: string, kbId?: string) =>
+        request<{ query: string; kbId: string; namespace: string; hits: KnowledgeHit[] }>(
+            KNOWLEDGE_API_ROOT, '/search', {
             method: 'POST',
-            body: JSON.stringify({query, topK, namespace}),
+            body: JSON.stringify({query, topK, namespace, kbId}),
         }),
+    /** 知识库清单（含默认库）。 */
+    bases: () => request<KnowledgeBase[]>(KNOWLEDGE_API_ROOT, '/bases'),
+    /** 创建知识库（name 必填，切片/检索参数可选）。 */
+    createBase: (name: string, description?: string) =>
+        request<KnowledgeBase>(KNOWLEDGE_API_ROOT, '/bases', {
+            method: 'POST',
+            body: JSON.stringify({name, description}),
+        }),
+    /** 删除知识库：库内须无文档；默认库不可删。 */
+    deleteBase: (kbId: string) =>
+        request<{ deleted: boolean; kbId: string }>(KNOWLEDGE_API_ROOT, `/bases/${kbId}`,
+            {method: 'DELETE'}),
     /** 应用向量模型档案到知识库；后端会持久化，重启后自动恢复。 */
     configureEmbedding: (payload: {
         embeddingEndpoint: string; embeddingApiKey: string; embeddingModel: string;

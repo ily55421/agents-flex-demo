@@ -41,7 +41,7 @@ public class KnowledgeDocumentStore {
     }
 
     /**
-     * 幂等建表；对旧版本缺少 content 列的表执行 ALTER 补齐。
+     * 幂等建表；对旧版本缺少 content / knowledge_base_id 列的表执行 ALTER 补齐。
      */
     @PostConstruct
     public void ensureSchema() {
@@ -51,12 +51,23 @@ public class KnowledgeDocumentStore {
         } catch (Exception ignored) {
             // 列已存在时 ALTER 报错，忽略即可。
         }
+        try {
+            jdbc.execute("ALTER TABLE knowledge_document ADD COLUMN knowledge_base_id VARCHAR");
+        } catch (Exception ignored) {
+            // 列已存在时 ALTER 报错，忽略即可。
+        }
+    }
+
+    /** @return 共享的 JdbcTemplate（KnowledgeBaseStore 建库表复用同一数据源） */
+    public JdbcTemplate getJdbcTemplate() {
+        return jdbc;
     }
 
     /**
      * 登记一个已入库文档（含原始全文）。
      *
-     * @param docId      文档 ID，同时是 RogueMemory namespace
+     * @param docId      文档 ID
+     * @param kbId       归属知识库 ID；null 记为默认库
      * @param title      展示标题
      * @param source     来源类型：MANUAL / FILE / BUILTIN
      * @param chunkCount 切片数量
@@ -64,11 +75,13 @@ public class KnowledgeDocumentStore {
      * @param signature  入库时生效的 embedding 签名
      * @param content    原始全文（供预览与编辑）
      */
-    public void insert(String docId, String title, String source, int chunkCount,
+    public void insert(String docId, String kbId, String title, String source, int chunkCount,
                        long charCount, String signature, String content) {
         jdbc.update("INSERT INTO knowledge_document(doc_id, title, source, chunk_count,"
-                + " char_count, embedding_signature, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                docId, title, source, chunkCount, charCount, signature, content, System.currentTimeMillis());
+                + " char_count, embedding_signature, content, created_at, knowledge_base_id)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                docId, title, source, chunkCount, charCount, signature, content,
+                System.currentTimeMillis(), kbId == null ? KnowledgeBaseStore.DEFAULT_KB_ID : kbId);
     }
 
     /**
@@ -106,7 +119,7 @@ public class KnowledgeDocumentStore {
     public List<Map<String, Object>> list() {
         List<Map<String, Object>> values = jdbc.query(
                 "SELECT doc_id, title, source, chunk_count, char_count, embedding_signature,"
-                        + " created_at FROM knowledge_document ORDER BY created_at DESC",
+                        + " created_at, knowledge_base_id FROM knowledge_document ORDER BY created_at DESC",
                 (rs, rowNum) -> {
                     Map<String, Object> row = new LinkedHashMap<>();
                     row.put("docId", rs.getString("doc_id"));
@@ -115,6 +128,7 @@ public class KnowledgeDocumentStore {
                     row.put("chunkCount", rs.getInt("chunk_count"));
                     row.put("charCount", rs.getLong("char_count"));
                     row.put("embeddingSignature", rs.getString("embedding_signature"));
+                    row.put("kbId", rs.getString("knowledge_base_id"));
                     row.put("createdAt", rs.getLong("created_at"));
                     return row;
                 });

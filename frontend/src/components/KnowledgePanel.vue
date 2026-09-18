@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
-import {IconDatabase, IconDeviceFloppy, IconEye, IconFileUpload, IconPencil, IconRefresh, IconScissors, IconSearch, IconTrash, IconUpload, IconX} from '@tabler/icons-vue'
+import {IconDatabase, IconDeviceFloppy, IconEye, IconFileUpload, IconPencil, IconPlus, IconRefresh, IconScissors, IconSearch, IconTrash, IconUpload, IconX} from '@tabler/icons-vue'
 import {knowledgeApi} from '@/api/agent'
-import type {EmbeddingPreset, IngestTask, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus, ParserDescriptor} from '@/types/agent'
+import type {EmbeddingPreset, IngestTask, KnowledgeBase, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus, ParserDescriptor} from '@/types/agent'
 import ConfigFieldLabel from '@/components/ConfigFieldLabel.vue'
 
 const status = ref<KnowledgeStatus | null>(null)
@@ -323,7 +323,8 @@ function onFileChange(event: Event) {
   const file = input.files?.[0]
   if (!file) return
   void run(async () => {
-    const task = await knowledgeApi.uploadDocumentAsync(file)
+    const task = await knowledgeApi.uploadDocumentAsync(file, undefined,
+      selectedKb.value === 'all' ? undefined : selectedKb.value)
     notice.value = `已提交入库任务：${file.name}（${task.status === 'PENDING' ? '排队中' : '处理中'}），进度见任务列表`
     await loadTasks()
   }).catch(() => undefined)
@@ -394,10 +395,63 @@ function rebuild() {
 function testSearch() {
   if (!searchQuery.value.trim()) return
   void run(async () => {
-    const result = await knowledgeApi.search(searchQuery.value, searchTopK.value, searchNamespace.value)
+    const result = await knowledgeApi.search(searchQuery.value, searchTopK.value,
+      searchNamespace.value, selectedKb.value)
     searchHits.value = result.hits
     searched.value = true
   }).catch(() => undefined)
+}
+
+/** 多知识库：清单、选中范围与建库/删库。 */
+const knowledgeBases = ref<KnowledgeBase[]>([])
+const selectedKb = ref('all')
+const newKbName = ref('')
+
+const selectedKbDeletable = computed(() => selectedKb.value.startsWith('kb-')
+  && selectedKb.value !== 'kb-default'
+  && !documents.value.some(doc => doc.kbId === selectedKb.value))
+
+async function loadBases() {
+  try {
+    knowledgeBases.value = await knowledgeApi.bases()
+    // 选中库被删除后回落到全部
+    if (selectedKb.value !== 'all'
+      && !knowledgeBases.value.some(kb => kb.kbId === selectedKb.value)) {
+      selectedKb.value = 'all'
+    }
+  } catch {
+    knowledgeBases.value = []
+  }
+}
+
+async function createKb() {
+  const name = newKbName.value.trim()
+  if (!name) return
+  try {
+    await knowledgeApi.createBase(name)
+    newKbName.value = ''
+    notice.value = `已创建知识库：${name}`
+    await loadBases()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '建库失败'
+  }
+}
+
+async function deleteSelectedKb() {
+  const kb = knowledgeBases.value.find(item => item.kbId === selectedKb.value)
+  if (!kb || !window.confirm(`删除知识库「${kb.name}」？`)) return
+  try {
+    await knowledgeApi.deleteBase(kb.kbId)
+    notice.value = `已删除知识库：${kb.name}`
+    await loadBases()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '删除失败'
+  }
+}
+
+function kbNameOf(kbId: string | null | undefined) {
+  if (!kbId) return '默认库'
+  return knowledgeBases.value.find(item => item.kbId === kbId)?.name ?? kbId
 }
 
 /** 批量导入：逐个文件提交异步任务（解析/向量化在后台推进），进度见任务列表。 */
@@ -413,7 +467,8 @@ async function importFiles(files: FileList | null) {
     const file = files[index]
     importProgress.value = `正在提交 (${index + 1}/${files.length})：${file.name}`
     try {
-      await knowledgeApi.uploadDocumentAsync(file)
+      await knowledgeApi.uploadDocumentAsync(file, undefined,
+        selectedKb.value === 'all' ? undefined : selectedKb.value)
       submitted++
     } catch (cause) {
       failures.push(`${file.name}: ${cause instanceof Error ? cause.message : '失败'}`)
@@ -466,7 +521,7 @@ function formatTime(millis: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadPresets(), loadParsers()])
+  await Promise.all([loadPresets(), loadParsers(), loadBases()])
   await reload().catch(() => undefined)
   await loadTasks()
   prefillFromSaved()
@@ -606,6 +661,22 @@ onMounted(async () => {
     <div v-if="error" class="knowledge-error" role="alert">{{ error }}</div>
     <div v-else-if="notice" class="knowledge-notice">{{ notice }}</div>
 
+    <div class="knowledge-kb-bar">
+      <select v-model="selectedKb" class="knowledge-namespace" aria-label="知识库范围">
+        <option value="all">全部知识库</option>
+        <option v-for="kb in knowledgeBases" :key="kb.kbId" :value="kb.kbId">{{ kb.name }}</option>
+      </select>
+      <input v-model.trim="newKbName" maxlength="60" placeholder="新知识库名称…"
+             aria-label="新知识库名称" @keydown.enter.prevent="createKb"/>
+      <button class="secondary-button" type="button" :disabled="busy || !newKbName.trim()" @click="createKb">
+        <IconPlus :size="15"/>建库
+      </button>
+      <button v-if="selectedKbDeletable" class="text-button danger-text" type="button"
+              title="删除选中的知识库（须先清空其文档）" @click="deleteSelectedKb">
+        <IconTrash :size="15"/>删库
+      </button>
+    </div>
+
     <div class="knowledge-search">
       <div class="field-block">
         <ConfigFieldLabel for-id="kb-query" text="检索测试" help="直接查询 RogueMemory 混合索引（向量 ANN + BM25）；可限定单个文档范围，Agent 的 search_knowledge 工具走同一链路。"/>
@@ -678,7 +749,7 @@ onMounted(async () => {
           <div class="knowledge-doc-main">
             <span class="knowledge-doc-title" :title="doc.title">{{ doc.title }}</span>
             <span class="knowledge-doc-meta">
-              {{ sourceLabels[doc.source] ?? doc.source }} · {{ doc.chunkCount }} 片 · {{ doc.charCount }} 字 ·
+              {{ kbNameOf(doc.kbId) }} · {{ sourceLabels[doc.source] ?? doc.source }} · {{ doc.chunkCount }} 片 · {{ doc.charCount }} 字 ·
               {{ formatTime(doc.createdAt) }}
             </span>
           </div>
@@ -1003,6 +1074,19 @@ onMounted(async () => {
   margin: 6px 0 0;
   font-size: 11.5px;
   color: #6b7280;
+}
+
+.knowledge-kb-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.knowledge-kb-bar input {
+  flex: 1;
+  min-width: 160px;
+  max-width: 260px;
 }
 
 .knowledge-tasks h3,

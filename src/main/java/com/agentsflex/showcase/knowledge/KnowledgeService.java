@@ -42,6 +42,8 @@ public class KnowledgeService {
     private final KnowledgeVectorCache vectorCache;
     /** 重排提供方：OpenAI 兼容 /rerank；未启用或失败时保持混合检索原始顺序。 */
     private final RerankProvider rerankProvider;
+    /** 多知识库存储：两级 namespace（kbId/docId）与库级检索参数。 */
+    private final KnowledgeBaseStore kbStore;
     private final ObjectMapper mapper = new ObjectMapper();
     /** 结构化切片器：保护代码块/表格不被切断，并把标题路径写入切片元数据。 */
     private final MarkdownChunker chunker;
@@ -63,24 +65,33 @@ public class KnowledgeService {
      * @param settings    向量模型配置与自建预设的本地持久化
      * @param vectorCache embedding 向量持久化缓存；null 时向量直连不缓存（测试场景）
      * @param rerankProvider 重排提供方
+     * @param kbStore     多知识库存储
      */
     @org.springframework.beans.factory.annotation.Autowired
     public KnowledgeService(KnowledgeProperties properties, KnowledgeDocumentStore store,
                             KnowledgeSettingsStore settings, KnowledgeVectorCache vectorCache,
-                            RerankProvider rerankProvider) {
+                            RerankProvider rerankProvider, KnowledgeBaseStore kbStore) {
         this.properties = properties;
         this.store = store;
         this.settings = settings;
         this.vectorCache = vectorCache;
         this.rerankProvider = rerankProvider;
+        this.kbStore = kbStore;
         this.searchMode = parseMode(properties.getSearchMode());
         this.chunker = new MarkdownChunker(properties.getChunkSize(), properties.getChunkOverlap());
     }
 
-    /** 兼容旧构造：向量不缓存，重排按配置开关。 */
+    /** 兼容旧构造：向量不缓存，重排按配置开关，库存储复用文档存储的数据源。 */
     public KnowledgeService(KnowledgeProperties properties, KnowledgeDocumentStore store,
                             KnowledgeSettingsStore settings) {
-        this(properties, store, settings, null, new RerankProvider(properties));
+        this(properties, store, settings, null, new RerankProvider(properties),
+                new KnowledgeBaseStore(store.getJdbcTemplate()));
+    }
+
+    /** @return 文档的完整 namespace：两级形态 kbId/docId（对齐 WeKnora 库-文档两层归属）。 */
+    private String namespaceOf(String docId) {
+        kbStore.bootstrapDefault();
+        return kbStore.kbIdOfDoc(docId) + "/" + docId;
     }
 
     /**
@@ -223,7 +234,8 @@ public class KnowledgeService {
     }
 
     /**
-     * 添加一篇文本文档：切片后逐块写入 RogueMemory（namespace = docId），并登记 DuckDB 元数据。
+     * 添加一篇文本文档到默认知识库：切片后逐块写入 RogueMemory（namespace = kbId/docId），
+     * 并登记 DuckDB 元数据。
      *
      * @param title   文档标题
      * @param content 正文；空内容会被拒绝
@@ -231,13 +243,34 @@ public class KnowledgeService {
      * @return 新文档的元数据视图
      */
     public synchronized Map<String, Object> addDocument(String title, String content, String source) {
+        return addDocumentTo(null, title, content, source);
+    }
+
+    /**
+     * 添加一篇文本文档到指定知识库；kbId 为空时归属默认库。
+     *
+     * @param kbId    目标知识库；null 或空使用默认库
+     * @param title   文档标题
+     * @param content 正文；空内容会被拒绝
+     * @param source  来源类型 MANUAL / FILE / BUILTIN
+     * @return 新文档的元数据视图
+     */
+    public synchronized Map<String, Object> addDocumentTo(String kbId, String title,
+                                                          String content, String source) {
         if (content == null || content.trim().isEmpty()) {
             throw new IllegalArgumentException("文档内容不能为空");
+        }
+        kbStore.bootstrapDefault();
+        String resolvedKbId = (kbId == null || kbId.trim().isEmpty() || "all".equalsIgnoreCase(kbId))
+                ? KnowledgeBaseStore.DEFAULT_KB_ID : kbId.trim();
+        if (kbStore.get(resolvedKbId) == null) {
+            throw new IllegalArgumentException("知识库不存在: " + resolvedKbId);
         }
         RogueMemory active = requireMemory();
         List<MarkdownChunker.MarkdownChunk> chunks = chunker.chunk(content);
         if (chunks.isEmpty()) throw new IllegalArgumentException("文档没有可入库的有效内容");
         String docId = "kb-" + UUID.randomUUID();
+        String namespace = resolvedKbId + "/" + docId;
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("title", title == null || title.trim().isEmpty() ? "未命名文档" : title.trim());
         metadata.put("source", source);
@@ -247,18 +280,19 @@ public class KnowledgeService {
                 chunkMeta.put("chunkIndex", String.valueOf(chunk.getIndex()));
                 // 标题路径写入切片元数据：检索命中后可展示「来自哪一节」
                 chunkMeta.put("headingPath", chunk.getHeadingPath());
-                active.add(chunk.getContent(), chunkMeta, docId);
+                active.add(chunk.getContent(), chunkMeta, namespace);
             }
         } catch (RuntimeException error) {
             this.lastError = error.getMessage();
-            rollbackPartial(active, docId, chunks.size());
+            rollbackPartial(active, namespace);
             throw error;
         }
         active.checkpoint();
-        store.insert(docId, metadata.get("title"), source, chunks.size(),
+        store.insert(docId, resolvedKbId, metadata.get("title"), source, chunks.size(),
                 content.trim().length(), signature == null ? "KEYWORD_ONLY" : signature, content.trim());
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("docId", docId);
+        view.put("kbId", resolvedKbId);
         view.put("title", metadata.get("title"));
         view.put("source", source);
         view.put("chunkCount", chunks.size());
@@ -280,17 +314,26 @@ public class KnowledgeService {
         if (query == null || query.trim().isEmpty()) return Collections.emptyList();
         RogueMemory active = requireMemory();
         int limit = topK > 0 ? topK : properties.getTopK();
-        SearchOptions options = (namespace == null || namespace.isBlank()
+        // namespace 参数语义：docId（前端文档范围）→ 翻译为两级 namespace
+        String effectiveNamespace = (namespace == null || namespace.isBlank()
                 || "all".equalsIgnoreCase(namespace))
+                ? null : namespaceOf(namespace.trim());
+        SearchOptions options = effectiveNamespace == null
                 ? SearchOptions.builder().build()
-                : SearchOptions.builder().namespace(namespace.trim()).build();
+                : SearchOptions.builder().namespace(effectiveNamespace).build();
         int candidateLimit = rerankProvider.available()
                 ? Math.max(limit, properties.getRerankTopK()) : limit;
         List<MemoryResult> results = active.search(query.trim(), candidateLimit, options);
         List<Map<String, Object>> values = new ArrayList<>();
         for (MemoryResult result : results) {
             Map<String, Object> hit = new LinkedHashMap<>();
-            hit.put("docId", result.getNamespace());
+            // namespace 形如 kbId/docId：对外仅暴露 docId
+            String fullNamespace = result.getNamespace();
+            String hitDocId = fullNamespace.contains("/")
+                    ? fullNamespace.substring(fullNamespace.indexOf('/') + 1) : fullNamespace;
+            hit.put("docId", hitDocId);
+            hit.put("kbId", fullNamespace.contains("/")
+                    ? fullNamespace.substring(0, fullNamespace.indexOf('/')) : null);
             hit.put("title", result.getMetadata() == null ? null : result.getMetadata().get("title"));
             hit.put("source", result.getMetadata() == null ? null : result.getMetadata().get("source"));
             hit.put("chunkIndex", result.getMetadata() == null ? null
@@ -329,6 +372,78 @@ public class KnowledgeService {
     /** 兼容旧调用：全库检索。 */
     public List<Map<String, Object>> search(String query, int topK) {
         return search(query, topK, null);
+    }
+
+    /**
+     * 创建知识库（自举默认库后写入）。
+     *
+     * @param kbId        库 ID
+     * @param name        名称
+     * @param description 描述；可空
+     * @param chunkSize   切片窗口；小于等于 0 用 512
+     * @param chunkOverlap 重叠；负数用 80
+     * @param topK        库级检索条数；小于等于 0 用全局配置
+     * @return 库视图
+     */
+    public synchronized Map<String, Object> createKnowledgeBase(String kbId, String name,
+                                                                String description,
+                                                                int chunkSize, int chunkOverlap,
+                                                                int topK) {
+        kbStore.bootstrapDefault();
+        return kbStore.create(kbId, name, description, chunkSize, chunkOverlap,
+                topK > 0 ? topK : properties.getTopK());
+    }
+
+    /** @return 全部未删除知识库 */
+    public List<Map<String, Object>> listKnowledgeBases() {
+        kbStore.bootstrapDefault();
+        return kbStore.list();
+    }
+
+    /**
+     * 限定单个知识库检索：逐文档 namespace 检索后合并排序（对齐 WeKnora 库内检索）。
+     *
+     * @param kbId  知识库 ID
+     * @param query 查询文本
+     * @param topK  返回条数；小于等于 0 时用库级 topK
+     * @return 命中片段（含 citeId / kbId）
+     */
+    public List<Map<String, Object>> searchKb(String kbId, String query, int topK) {
+        if (query == null || query.trim().isEmpty()) return Collections.emptyList();
+        kbStore.bootstrapDefault();
+        Map<String, Object> kb = kbStore.get(kbId);
+        if (kb == null) throw new IllegalArgumentException("知识库不存在: " + kbId);
+        int limit = topK > 0 ? topK : ((Number) kb.getOrDefault("topK", properties.getTopK())).intValue();
+        RogueMemory active = requireMemory();
+        List<MemoryResult> merged = new ArrayList<>();
+        for (String docId : kbStore.docIdsOf(kbId)) {
+            merged.addAll(active.search(query.trim(), limit,
+                    SearchOptions.builder().namespace(kbId + "/" + docId).build()));
+        }
+        merged.sort((a, b) -> Float.compare(b.getScore(), a.getScore()));
+        List<Map<String, Object>> values = new ArrayList<>();
+        for (MemoryResult result : merged) {
+            String fullNamespace = result.getNamespace();
+            String hitDocId = fullNamespace.contains("/")
+                    ? fullNamespace.substring(fullNamespace.indexOf('/') + 1) : fullNamespace;
+            Map<String, Object> hit = new LinkedHashMap<>();
+            hit.put("docId", hitDocId);
+            hit.put("kbId", kbId);
+            hit.put("title", result.getMetadata() == null ? null : result.getMetadata().get("title"));
+            hit.put("chunkIndex", result.getMetadata() == null ? null
+                    : result.getMetadata().get("chunkIndex"));
+            hit.put("headingPath", result.getMetadata() == null ? null
+                    : result.getMetadata().get("headingPath"));
+            hit.put("content", result.getContent());
+            hit.put("score", result.getScore());
+            hit.put("mode", searchMode.name());
+            values.add(hit);
+            if (values.size() >= limit) break;
+        }
+        for (int index = 0; index < values.size(); index++) {
+            values.get(index).put("citeId", index + 1);
+        }
+        return values;
     }
 
     /**
@@ -398,6 +513,8 @@ public class KnowledgeService {
         }
         RogueMemory active = requireMemory();
         String docId = "kb-" + UUID.randomUUID();
+        kbStore.bootstrapDefault();
+        String namespace = KnowledgeBaseStore.DEFAULT_KB_ID + "/" + docId;
         Map<String, String> docMeta = new LinkedHashMap<>();
         docMeta.put("title", title == null || title.trim().isEmpty() ? "问答事实库" : title.trim());
         docMeta.put("source", "FILE");
@@ -416,19 +533,19 @@ public class KnowledgeService {
                 if (station != null) chunkMeta.put("station", String.valueOf(station));
                 if (category != null) chunkMeta.put("category", String.valueOf(category));
                 chunkMeta.put("chunkIndex", String.valueOf(imported));
-                active.add(((String) textValue).trim(), chunkMeta, docId);
+                active.add(((String) textValue).trim(), chunkMeta, namespace);
                 imported++;
             }
         } catch (RuntimeException error) {
             this.lastError = error.getMessage();
-            rollbackPartial(active, docId, imported);
+            rollbackPartial(active, namespace);
             throw error;
         }
         if (imported == 0) {
             throw new IllegalArgumentException("JSONL 中没有可导入的条目（需要包含 text 字段）");
         }
         active.checkpoint();
-        store.insert(docId, docMeta.get("title"), "FILE", imported,
+        store.insert(docId, KnowledgeBaseStore.DEFAULT_KB_ID, docMeta.get("title"), "FILE", imported,
                 jsonlText.trim().length(), signature == null ? "KEYWORD_ONLY" : signature, jsonlText.trim());
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("docId", docId);
@@ -503,8 +620,9 @@ public class KnowledgeService {
         if (chunks.isEmpty()) throw new IllegalArgumentException("文档没有可入库的有效内容");
         String previousTitle = titleOf(docId);
         String source = sourceOf(docId);
+        String namespace = namespaceOf(docId);
         // 1. 删除旧向量切片，避免新旧内容混存。
-        active.deleteByNamespace(docId);
+        active.deleteByNamespace(namespace);
         // 2. 按新内容重新写入切片。
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("title", resolvedTitle);
@@ -514,7 +632,7 @@ public class KnowledgeService {
                 Map<String, String> chunkMeta = new LinkedHashMap<>(metadata);
                 chunkMeta.put("chunkIndex", String.valueOf(chunk.getIndex()));
                 chunkMeta.put("headingPath", chunk.getHeadingPath());
-                active.add(chunk.getContent(), chunkMeta, docId);
+                active.add(chunk.getContent(), chunkMeta, namespace);
             }
         } catch (RuntimeException error) {
             this.lastError = error.getMessage();
@@ -572,7 +690,7 @@ public class KnowledgeService {
      */
     public synchronized void deleteDocument(String docId) {
         RogueMemory active = requireMemory();
-        active.deleteByNamespace(docId);
+        active.deleteByNamespace(namespaceOf(docId));
         active.checkpoint();
         store.delete(docId);
     }
@@ -847,6 +965,7 @@ public class KnowledgeService {
     private void rebuildFromStore() {
         List<Map<String, Object>> rows = store.list();
         if (rows.isEmpty()) return;
+        kbStore.bootstrapDefault();
         RogueMemory active = requireMemory();
         int rebuilt = 0;
         for (Map<String, Object> row : rows) {
@@ -857,6 +976,11 @@ public class KnowledgeService {
             String title = titleObj == null ? docId : String.valueOf(titleObj);
             Object sourceObj = row.get("source");
             String source = sourceObj == null ? "MANUAL" : String.valueOf(sourceObj);
+            // 两级 namespace：重建时按文档归属库写入（历史无归属文档已在自举时回填默认库）
+            Object kbObj = row.get("kbId");
+            String kbId = kbObj == null || String.valueOf(kbObj).isBlank()
+                    ? KnowledgeBaseStore.DEFAULT_KB_ID : String.valueOf(kbObj);
+            String namespace = kbId + "/" + docId;
             List<MarkdownChunker.MarkdownChunk> chunks = chunker.chunk(content.trim());
             if (chunks.isEmpty()) continue;
             Map<String, String> metadata = new LinkedHashMap<>();
@@ -867,7 +991,7 @@ public class KnowledgeService {
                     Map<String, String> chunkMeta = new LinkedHashMap<>(metadata);
                     chunkMeta.put("chunkIndex", String.valueOf(chunk.getIndex()));
                     chunkMeta.put("headingPath", chunk.getHeadingPath());
-                    active.add(chunk.getContent(), chunkMeta, docId);
+                    active.add(chunk.getContent(), chunkMeta, namespace);
                 }
             } catch (RuntimeException error) {
                 this.lastError = "索引重建失败（" + title + "）：" + error.getMessage();
@@ -903,9 +1027,15 @@ public class KnowledgeService {
      * @param docId    文档 namespace
      * @param attempts 计划写入的切片数（仅用于日志语义）
      */
-    private static void rollbackPartial(RogueMemory active, String docId, int attempts) {
+    /**
+     * 入库中途失败时回滚该文档已写入的片段，避免产生半篇文档。
+     *
+     * @param active    当前 RogueMemory
+     * @param namespace 完整 namespace（kbId/docId）
+     */
+    private static void rollbackPartial(RogueMemory active, String namespace) {
         try {
-            active.deleteByNamespace(docId);
+            active.deleteByNamespace(namespace);
         } catch (RuntimeException ignored) {
             // 回滚失败时保留原始异常给调用方。
         }

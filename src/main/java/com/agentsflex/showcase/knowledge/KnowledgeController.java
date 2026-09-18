@@ -42,6 +42,7 @@ public class KnowledgeController {
     private final KnowledgeProperties properties;
     private final DocumentParserRegistry parserRegistry;
     private final IngestPipeline ingestPipeline;
+    private final KnowledgeBaseStore kbStore;
     private final ObjectMapper mapper;
 
     /**
@@ -51,6 +52,7 @@ public class KnowledgeController {
      * @param properties       上传限制等配置
      * @param parserRegistry   文档解析器注册表（多格式上传入库）
      * @param ingestPipeline   异步灌入流水线（任务状态机）
+     * @param kbStore          多知识库存储
      * @param mapper           Jackson 序列化器（快照导出/导入）
      */
     public KnowledgeController(KnowledgeService knowledgeService,
@@ -59,6 +61,7 @@ public class KnowledgeController {
                                KnowledgeProperties properties,
                                DocumentParserRegistry parserRegistry,
                                IngestPipeline ingestPipeline,
+                               KnowledgeBaseStore kbStore,
                                ObjectMapper mapper) {
         this.knowledgeService = knowledgeService;
         this.documentStore = documentStore;
@@ -66,6 +69,7 @@ public class KnowledgeController {
         this.properties = properties;
         this.parserRegistry = parserRegistry;
         this.ingestPipeline = ingestPipeline;
+        this.kbStore = kbStore;
         this.mapper = mapper;
     }
 
@@ -159,7 +163,8 @@ public class KnowledgeController {
      */
     @PostMapping("/documents/upload/async")
     public Map<String, Object> uploadDocumentAsync(@RequestParam("file") MultipartFile file,
-                                                   @RequestParam(value = "title", required = false) String title)
+                                                   @RequestParam(value = "title", required = false) String title,
+                                                   @RequestParam(value = "kbId", required = false) String kbId)
             throws IOException {
         String originalName = file.getOriginalFilename() == null ? "document" : file.getOriginalFilename();
         if (!parserRegistry.supports(originalName)) {
@@ -174,13 +179,13 @@ public class KnowledgeController {
             throw new IllegalArgumentException("文件超过解析上限 "
                     + properties.getMaxParseBytes() / 1024 / 1024 + "MB");
         }
-        return ingestPipeline.submitFile(originalName, file.getBytes(), title);
+        return ingestPipeline.submitFile(originalName, file.getBytes(), title, kbId);
     }
 
     /**
      * 粘贴文本异步入库（大文本场景避免请求线程被向量化阻塞）。
      *
-     * @param body title 与 content 字段
+     * @param body title / content 必填；kbId 可选（缺省默认库）
      * @return 任务视图
      */
     @PostMapping("/documents/async")
@@ -188,7 +193,7 @@ public class KnowledgeController {
         if (body.get("content") == null || body.get("content").trim().isEmpty()) {
             throw new IllegalArgumentException("文档内容不能为空");
         }
-        return ingestPipeline.submitText(body.get("title"), body.get("content"));
+        return ingestPipeline.submitText(body.get("kbId"), body.get("title"), body.get("content"));
     }
 
     /**
@@ -304,20 +309,79 @@ public class KnowledgeController {
     }
 
     /**
-     * 检索测试：返回 TopK 命中片段、分数与生效模式；可限定单个文档 namespace。
+     * 检索测试：返回 TopK 命中片段、分数与生效模式；可限定单个文档或单个知识库。
      *
-     * @param body query 必填，topK / namespace 可选
+     * @param body query 必填；topK / namespace（docId）/ kbId 可选，kbId 优先于 namespace
      * @return 命中列表与生效检索模式
      */
     @PostMapping("/search")
     public Map<String, Object> search(@RequestBody Map<String, Object> body) {
         String query = body.get("query") == null ? null : String.valueOf(body.get("query"));
         int topK = body.get("topK") instanceof Number ? ((Number) body.get("topK")).intValue() : 0;
+        String kbId = body.get("kbId") == null ? null : String.valueOf(body.get("kbId"));
         String namespace = body.get("namespace") == null ? null : String.valueOf(body.get("namespace"));
+        List<Map<String, Object>> hits;
+        if (kbId != null && !kbId.isBlank() && !"all".equalsIgnoreCase(kbId)) {
+            hits = knowledgeService.searchKb(kbId, query, topK);
+        } else {
+            hits = knowledgeService.search(query, topK, namespace);
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("query", query);
+        result.put("kbId", kbId == null || kbId.isBlank() ? "all" : kbId);
         result.put("namespace", namespace == null || namespace.isBlank() ? "all" : namespace);
-        result.put("hits", knowledgeService.search(query, topK, namespace));
+        result.put("hits", hits);
+        return result;
+    }
+
+    /**
+     * @return 全部知识库（含默认库），按创建时间正序
+     */
+    @GetMapping("/bases")
+    public List<Map<String, Object>> bases() {
+        kbStore.bootstrapDefault();
+        return kbStore.list();
+    }
+
+    /**
+     * 创建知识库。
+     *
+     * @param body name 必填；description / chunkSize / chunkOverlap / topK 可选
+     * @return 新库视图
+     */
+    @PostMapping("/bases")
+    public Map<String, Object> createBase(@RequestBody Map<String, Object> body) {
+        kbStore.bootstrapDefault();
+        String name = body.get("name") == null ? "" : String.valueOf(body.get("name")).trim();
+        if (name.isEmpty()) throw new IllegalArgumentException("知识库名称不能为空");
+        String kbId = "kb-" + java.util.UUID.randomUUID();
+        int chunkSize = body.get("chunkSize") instanceof Number number ? number.intValue() : 512;
+        int chunkOverlap = body.get("chunkOverlap") instanceof Number number ? number.intValue() : 80;
+        int topK = body.get("topK") instanceof Number number ? number.intValue() : properties.getTopK();
+        String description = body.get("description") == null ? null : String.valueOf(body.get("description"));
+        return kbStore.create(kbId, name, description, chunkSize, chunkOverlap, topK);
+    }
+
+    /**
+     * 删除知识库：库内须无文档（先清空再删），默认库不可删除。
+     *
+     * @param kbId 库 ID
+     * @return 删除结果
+     */
+    @DeleteMapping("/bases/{kbId}")
+    public Map<String, Object> deleteBase(@PathVariable String kbId) {
+        if (KnowledgeBaseStore.DEFAULT_KB_ID.equals(kbId)) {
+            throw new IllegalArgumentException("默认知识库不可删除");
+        }
+        if (kbStore.docCountOf(kbId) > 0) {
+            throw new IllegalStateException("知识库仍有文档，请先清空文档再删除");
+        }
+        if (!kbStore.softDelete(kbId)) {
+            throw new IllegalArgumentException("知识库不存在: " + kbId);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deleted", true);
+        result.put("kbId", kbId);
         return result;
     }
 

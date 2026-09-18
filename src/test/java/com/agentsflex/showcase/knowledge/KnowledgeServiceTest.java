@@ -168,6 +168,37 @@ class KnowledgeServiceTest {
     }
 
     /**
+     * 多知识库：文档归属库后，库内检索只命中本库文档；全库检索仍可见。
+     */
+    @Test
+    void kbScopedSearchIsolatesDocuments() {
+        // 先创建两个库（addDocumentTo 会校验库存在）
+        service.createKnowledgeBase("kb-alpha", "甲库", null, 512, 80, 5);
+        service.createKnowledgeBase("kb-beta", "乙库", null, 512, 80, 5);
+
+        service.addDocumentTo("kb-alpha", "甲库文档", "甲库专属 独特标记甲库 内容。", "MANUAL");
+        service.addDocumentTo("kb-beta", "乙库文档", "乙库专属 独特标记乙库 内容。", "MANUAL");
+
+        List<Map<String, Object>> alphaHits = service.searchKb("kb-alpha", "独特标记甲库", 5);
+        assertThat(alphaHits).isNotEmpty();
+        assertThat(alphaHits.get(0).get("kbId")).isEqualTo("kb-alpha");
+
+        // 甲库检索结果不出现乙库文档（共享 bigram 可能 0 分弱匹配本库文档，属预期）
+        assertThat(service.searchKb("kb-alpha", "独特标记乙库", 5))
+                .extracting(hit -> hit.get("title")).doesNotContain("乙库文档");
+        assertThat(service.searchKb("kb-beta", "独特标记甲库", 5))
+                .extracting(hit -> hit.get("title")).doesNotContain("甲库文档");
+
+        // 全库检索两篇都可见
+        List<Map<String, Object>> allHits = service.search("独特标记", 10);
+        assertThat(allHits).hasSizeGreaterThanOrEqualTo(2);
+
+        // 不存在的库抛出可读错误
+        assertThatThrownBy(() -> service.searchKb("kb-none", "任何", 3))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /**
      * 切片预览按传入参数试算，不落库（文档数与切片数保持不变）。
      */
     @Test

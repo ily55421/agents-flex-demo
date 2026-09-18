@@ -71,31 +71,44 @@ public class IngestPipeline {
      * @param fileName 原始文件名
      * @param bytes    文件字节流
      * @param title    标题；空则取文件名去扩展名
+     * @param kbId     目标知识库；null 归属默认库
      * @return 任务视图
      */
-    public Map<String, Object> submitFile(String fileName, byte[] bytes, String title) {
+    public Map<String, Object> submitFile(String fileName, byte[] bytes, String title, String kbId) {
         String resolvedTitle = (title == null || title.trim().isEmpty())
                 ? stripExtension(fileName) : title.trim();
         return submit(resolvedTitle, "FILE", fileName, () -> {
             ParsedDocument parsed = parserRegistry.parse(fileName, bytes);
             // 取消检查点：写索引（原子操作）开始前，取消不产生半篇文档
             beforeIndexing();
-            return knowledgeService.addDocument(resolvedTitle, parsed.getMarkdown(), "FILE");
+            return knowledgeService.addDocumentTo(kbId, resolvedTitle, parsed.getMarkdown(), "FILE");
         });
     }
 
     /**
-     * 提交文本入库任务（粘贴路径）。
+     * 提交文本入库任务（粘贴路径），归属默认库。
      *
      * @param title   标题
      * @param content 正文
      * @return 任务视图
      */
     public Map<String, Object> submitText(String title, String content) {
+        return submitText(null, title, content);
+    }
+
+    /**
+     * 提交文本入库任务到指定知识库。
+     *
+     * @param kbId    目标知识库；null 归属默认库
+     * @param title   标题
+     * @param content 正文
+     * @return 任务视图
+     */
+    public Map<String, Object> submitText(String kbId, String title, String content) {
         String resolvedTitle = (title == null || title.trim().isEmpty()) ? "未命名文档" : title.trim();
         return submit(resolvedTitle, "MANUAL", null, () -> {
             beforeIndexing();
-            return knowledgeService.addDocument(resolvedTitle, content, "MANUAL");
+            return knowledgeService.addDocumentTo(kbId, resolvedTitle, content, "MANUAL");
         });
     }
 

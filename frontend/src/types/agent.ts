@@ -374,6 +374,7 @@ export interface KnowledgeStatus {
 
 export interface KnowledgeDocument {
   docId: string
+  kbId?: string | null
   title: string
   source: 'MANUAL' | 'FILE' | 'BUILTIN'
   chunkCount: number
@@ -391,6 +392,8 @@ export interface KnowledgeHit {
   headingPath: string | null
   /** 稳定引用号（1 起）：Agent 回答中的 [cN] 与此对应。 */
   citeId?: number
+  /** 命中文档归属的知识库 ID（两级 namespace 剥离后）。 */
+  kbId?: string | null
   /** 重排相关性分数；重排未启用或失败时不存在。 */
   rerankScore?: number
   content: string
@@ -443,6 +446,18 @@ export interface IngestTask {
   progress: number
   chunkCount: number
   error: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** 知识库视图（GET /api/knowledge/bases）。 */
+export interface KnowledgeBase {
+  kbId: string
+  name: string
+  description: string | null
+  chunkSize: number
+  chunkOverlap: number
+  topK: number
   createdAt: number
   updatedAt: number
 }
