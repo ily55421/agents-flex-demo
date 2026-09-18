@@ -427,6 +427,22 @@ export interface ChunkPreviewItem {
   content: string
 }
 
+/** 知识灌入任务视图（GET /api/knowledge/tasks）。 */
+export interface IngestTask {
+  taskId: string
+  docId: string | null
+  title: string
+  source: string
+  fileName: string | null
+  status: 'PENDING' | 'PROCESSING' | 'FINALIZING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+  stage: string | null
+  progress: number
+  chunkCount: number
+  error: string | null
+  createdAt: number
+  updatedAt: number
+}
+
 // SessionSummary 是同一 conversationId 的全部 Turn 在会话列表中的聚合摘要。
 export interface SessionSummary {
   conversationId: string

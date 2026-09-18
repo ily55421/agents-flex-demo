@@ -23,6 +23,10 @@ public class KnowledgeProperties {
     private int chunkSize = 512;
     /** 相邻切片重叠字符数；对齐 WeKnora chunker 默认 80。 */
     private int chunkOverlap = 80;
+    /** 异步灌入并发线程数；默认 2，避免多任务并行向量化的限流冲突。 */
+    private int ingestConcurrency = 2;
+    /** 异步灌入排队上限；队列满时提交立即失败为 FAILED 任务。 */
+    private int ingestQueueCapacity = 100;
     private String embeddingEndpoint = "";
     private String embeddingApiKey = "";
     private String embeddingModel = "bge-m3";
@@ -89,6 +93,22 @@ public class KnowledgeProperties {
 
     public void setChunkOverlap(int chunkOverlap) {
         this.chunkOverlap = chunkOverlap;
+    }
+
+    public int getIngestConcurrency() {
+        return ingestConcurrency;
+    }
+
+    public void setIngestConcurrency(int ingestConcurrency) {
+        this.ingestConcurrency = ingestConcurrency;
+    }
+
+    public int getIngestQueueCapacity() {
+        return ingestQueueCapacity;
+    }
+
+    public void setIngestQueueCapacity(int ingestQueueCapacity) {
+        this.ingestQueueCapacity = ingestQueueCapacity;
     }
 
     public String getEmbeddingEndpoint() {

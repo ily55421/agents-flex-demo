@@ -50,6 +50,9 @@ agents-flex:
     # 结构化切片参数：对齐 WeKnora chunker 默认值（512 字符窗口 / 80 字符重叠）
     chunk-size: ${KNOWLEDGE_CHUNK_SIZE:512}
     chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:80}
+    # 异步灌入流水线：并发线程数与排队上限；队列满时提交立即失败，不阻塞上传请求
+    ingest-concurrency: ${KNOWLEDGE_INGEST_CONCURRENCY:2}
+    ingest-queue-capacity: ${KNOWLEDGE_INGEST_QUEUE_CAPACITY:100}
     embedding-endpoint: ${EMBEDDING_ENDPOINT:}
     embedding-api-key: ${EMBEDDING_API_KEY:}
     embedding-model: ${EMBEDDING_MODEL:bge-m3}

@@ -41,6 +41,7 @@ public class KnowledgeController {
     private final KnowledgeSettingsStore settingsStore;
     private final KnowledgeProperties properties;
     private final DocumentParserRegistry parserRegistry;
+    private final IngestPipeline ingestPipeline;
     private final ObjectMapper mapper;
 
     /**
@@ -49,6 +50,7 @@ public class KnowledgeController {
      * @param settingsStore    向量模型配置与自建预设持久化
      * @param properties       上传限制等配置
      * @param parserRegistry   文档解析器注册表（多格式上传入库）
+     * @param ingestPipeline   异步灌入流水线（任务状态机）
      * @param mapper           Jackson 序列化器（快照导出/导入）
      */
     public KnowledgeController(KnowledgeService knowledgeService,
@@ -56,12 +58,14 @@ public class KnowledgeController {
                                KnowledgeSettingsStore settingsStore,
                                KnowledgeProperties properties,
                                DocumentParserRegistry parserRegistry,
+                               IngestPipeline ingestPipeline,
                                ObjectMapper mapper) {
         this.knowledgeService = knowledgeService;
         this.documentStore = documentStore;
         this.settingsStore = settingsStore;
         this.properties = properties;
         this.parserRegistry = parserRegistry;
+        this.ingestPipeline = ingestPipeline;
         this.mapper = mapper;
     }
 
@@ -143,6 +147,93 @@ public class KnowledgeController {
     @GetMapping("/parsers")
     public List<Map<String, Object>> parsers() {
         return parserRegistry.describe();
+    }
+
+    /**
+     * 上传文件并异步入库：立即返回任务视图，解析/切片/向量化在后台推进，
+     * 进度经 GET /tasks 轮询。
+     *
+     * @param file  上传文件；格式与大小校验同同步路径
+     * @param title 可选标题，缺省使用文件名
+     * @return 任务视图（含 taskId / status）
+     */
+    @PostMapping("/documents/upload/async")
+    public Map<String, Object> uploadDocumentAsync(@RequestParam("file") MultipartFile file,
+                                                   @RequestParam(value = "title", required = false) String title)
+            throws IOException {
+        String originalName = file.getOriginalFilename() == null ? "document" : file.getOriginalFilename();
+        if (!parserRegistry.supports(originalName)) {
+            throw new IllegalArgumentException("不支持的文件格式 ." + extensionOf(originalName)
+                    + "，当前支持：" + String.join(" / ", parserRegistry.supportedExtensions()));
+        }
+        if (file.getSize() > properties.getMaxUploadBytes()) {
+            throw new IllegalArgumentException("文件超过大小限制 "
+                    + properties.getMaxUploadBytes() / 1024 / 1024 + "MB");
+        }
+        if (file.getSize() > properties.getMaxParseBytes()) {
+            throw new IllegalArgumentException("文件超过解析上限 "
+                    + properties.getMaxParseBytes() / 1024 / 1024 + "MB");
+        }
+        return ingestPipeline.submitFile(originalName, file.getBytes(), title);
+    }
+
+    /**
+     * 粘贴文本异步入库（大文本场景避免请求线程被向量化阻塞）。
+     *
+     * @param body title 与 content 字段
+     * @return 任务视图
+     */
+    @PostMapping("/documents/async")
+    public Map<String, Object> addDocumentAsync(@RequestBody Map<String, String> body) {
+        if (body.get("content") == null || body.get("content").trim().isEmpty()) {
+            throw new IllegalArgumentException("文档内容不能为空");
+        }
+        return ingestPipeline.submitText(body.get("title"), body.get("content"));
+    }
+
+    /**
+     * 异步重建单篇文档索引（对齐 WeKnora reparse）。
+     *
+     * @param docId 文档 ID
+     * @return 任务视图
+     */
+    @PostMapping("/documents/{docId}/reparse/async")
+    public Map<String, Object> reparseDocumentAsync(@PathVariable String docId) {
+        return ingestPipeline.submitReparse(docId);
+    }
+
+    /**
+     * @return 最近灌入任务（上限 50），供任务面板轮询
+     */
+    @GetMapping("/tasks")
+    public List<Map<String, Object>> tasks() {
+        return ingestPipeline.tasks();
+    }
+
+    /**
+     * @param taskId 任务 ID
+     * @return 任务视图
+     */
+    @GetMapping("/tasks/{taskId}")
+    public Map<String, Object> task(@PathVariable String taskId) {
+        Map<String, Object> task = ingestPipeline.task(taskId);
+        if (task == null) throw new IllegalArgumentException("任务不存在: " + taskId);
+        return task;
+    }
+
+    /**
+     * 请求取消任务：INDEXING（原子写索引）开始前生效。
+     *
+     * @param taskId 任务 ID
+     * @return 取消结果
+     */
+    @PostMapping("/tasks/{taskId}/cancel")
+    public Map<String, Object> cancelTask(@PathVariable String taskId) {
+        boolean accepted = ingestPipeline.cancel(taskId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("accepted", accepted);
+        result.put("taskId", taskId);
+        return result;
     }
 
     /**

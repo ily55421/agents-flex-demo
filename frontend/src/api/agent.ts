@@ -10,6 +10,7 @@ import type {
     GraphSummary,
     GraphView,
     ChunkPreviewItem,
+    IngestTask,
     KnowledgeDocument,
     KnowledgeHit,
     KnowledgeSearchMode,
@@ -135,6 +136,31 @@ export const knowledgeApi = {
                 method: 'POST',
                 body: JSON.stringify({content, chunkSize, overlap}),
             }),
+    /** 上传文件并异步入库：立即返回任务视图，进度经 tasks() 轮询。 */
+    uploadDocumentAsync: async (file: File, title?: string): Promise<IngestTask> => {
+        const form = new FormData()
+        form.append('file', file)
+        if (title) form.append('title', title)
+        const response = await fetch(`${KNOWLEDGE_API_ROOT}/documents/upload/async`,
+            {method: 'POST', body: form})
+        if (!response.ok) {
+            const body = (await response.json().catch(() => null)) as { message?: string } | null
+            throw new Error(body?.message || `任务提交失败 (${response.status})`)
+        }
+        return response.json() as Promise<IngestTask>
+    },
+    /** 粘贴文本异步入库（大文本避免请求线程被向量化阻塞）。 */
+    addDocumentAsync: (title: string, content: string) =>
+        request<IngestTask>(KNOWLEDGE_API_ROOT, '/documents/async', {
+            method: 'POST',
+            body: JSON.stringify({title, content}),
+        }),
+    /** 最近灌入任务列表（上限 50），供任务面板轮询。 */
+    tasks: () => request<IngestTask[]>(KNOWLEDGE_API_ROOT, '/tasks'),
+    /** 取消任务：INDEXING（原子写索引）开始前生效。 */
+    cancelTask: (taskId: string) =>
+        request<{ accepted: boolean; taskId: string }>(KNOWLEDGE_API_ROOT, `/tasks/${taskId}/cancel`,
+            {method: 'POST'}),
     /** 删除文档（RogueMemory namespace + DuckDB 元数据）。 */
     deleteDocument: (docId: string) =>
         request<{ deleted: boolean; docId: string }>(KNOWLEDGE_API_ROOT, `/documents/${docId}`, {method: 'DELETE'}),

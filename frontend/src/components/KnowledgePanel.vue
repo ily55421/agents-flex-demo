@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {IconDatabase, IconDeviceFloppy, IconEye, IconFileUpload, IconPencil, IconRefresh, IconScissors, IconSearch, IconTrash, IconUpload, IconX} from '@tabler/icons-vue'
 import {knowledgeApi} from '@/api/agent'
-import type {EmbeddingPreset, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus, ParserDescriptor} from '@/types/agent'
+import type {EmbeddingPreset, IngestTask, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus, ParserDescriptor} from '@/types/agent'
 import ConfigFieldLabel from '@/components/ConfigFieldLabel.vue'
 
 const status = ref<KnowledgeStatus | null>(null)
@@ -323,15 +323,64 @@ function onFileChange(event: Event) {
   const file = input.files?.[0]
   if (!file) return
   void run(async () => {
-    const doc = await knowledgeApi.uploadDocument(file)
-    // 附带解析元数据：页数/表数/页数让用户确认解析器吃到了完整内容
-    const extra = doc.pageCount ? `，${doc.pageCount} 页`
-      : doc.sheetCount ? `，${doc.sheetCount} 个工作表`
-      : doc.slideCount ? `，${doc.slideCount} 页幻灯片` : ''
-    notice.value = `已解析并入库：${file.name}${extra}（${doc.chunkCount} 片）`
+    const task = await knowledgeApi.uploadDocumentAsync(file)
+    notice.value = `已提交入库任务：${file.name}（${task.status === 'PENDING' ? '排队中' : '处理中'}），进度见任务列表`
+    await loadTasks()
   }).catch(() => undefined)
   input.value = ''
 }
+
+/** 入库任务面板状态与轮询：有活跃任务时每 1.5s 刷新，全部终态后停止。 */
+const tasks = ref<IngestTask[]>([])
+let taskTimer: ReturnType<typeof setTimeout> | null = null
+const taskStatusLabels: Record<string, string> = {
+  PENDING: '排队中', PROCESSING: '处理中', FINALIZING: '收尾中',
+  COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消',
+}
+const taskStageLabels: Record<string, string> = {
+  PARSING: '解析中', INDEXING: '写索引中', FINALIZING: '收尾中',
+}
+
+async function loadTasks() {
+  try {
+    tasks.value = await knowledgeApi.tasks()
+  } catch {
+    tasks.value = []
+  }
+  const active = tasks.value.some(task => task.status === 'PENDING' || task.status === 'PROCESSING')
+  if (active) {
+    scheduleTaskPolling()
+  } else if (taskTimer) {
+    clearTimeout(taskTimer)
+    taskTimer = null
+    // 刚从活跃转终态：刷新文档清单与状态，让新入库文档立即可见
+    await Promise.all([loadStatus(), loadDocuments()])
+  }
+}
+
+function scheduleTaskPolling() {
+  if (taskTimer) return
+  taskTimer = setTimeout(async () => {
+    taskTimer = null
+    await loadTasks()
+  }, 1500)
+}
+
+async function cancelTask(task: IngestTask) {
+  try {
+    await knowledgeApi.cancelTask(task.taskId)
+    await loadTasks()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '取消失败'
+  }
+}
+
+onBeforeUnmount(() => {
+  if (taskTimer) {
+    clearTimeout(taskTimer)
+    taskTimer = null
+  }
+})
 
 function removeDocument(doc: KnowledgeDocument) {
   void run(() => knowledgeApi.deleteDocument(doc.docId), `已删除：${doc.title}`).catch(() => undefined)
@@ -351,32 +400,31 @@ function testSearch() {
   }).catch(() => undefined)
 }
 
-/** 批量导入：逐个上传所选文件（.md/.txt/.jsonl），显示进度；失败不中断后续文件。 */
+/** 批量导入：逐个文件提交异步任务（解析/向量化在后台推进），进度见任务列表。 */
 async function importFiles(files: FileList | null) {
   if (!files || !files.length) return
   importing.value = true
   busy.value = true
   error.value = null
   notice.value = null
-  let ok = 0
-  let failed = 0
+  let submitted = 0
   const failures: string[] = []
   for (let index = 0; index < files.length; index++) {
     const file = files[index]
-    importProgress.value = `正在导入 (${index + 1}/${files.length})：${file.name}`
+    importProgress.value = `正在提交 (${index + 1}/${files.length})：${file.name}`
     try {
-      await knowledgeApi.uploadDocument(file)
-      ok++
+      await knowledgeApi.uploadDocumentAsync(file)
+      submitted++
     } catch (cause) {
-      failed++
       failures.push(`${file.name}: ${cause instanceof Error ? cause.message : '失败'}`)
     }
-    await Promise.all([loadStatus(), loadDocuments()])
   }
   importing.value = false
   busy.value = false
   importProgress.value = ''
-  notice.value = `批量导入完成：成功 ${ok} 个${failed ? `，失败 ${failed} 个（${failures.join('；')}）` : ''}`
+  notice.value = `已提交 ${submitted} 个入库任务，进度见任务列表`
+      + (failures.length ? `；提交失败：${failures.join('；')}` : '')
+  await loadTasks()
 }
 
 function onMultiFileChange(event: Event) {
@@ -420,6 +468,7 @@ function formatTime(millis: number) {
 onMounted(async () => {
   await Promise.all([loadPresets(), loadParsers()])
   await reload().catch(() => undefined)
+  await loadTasks()
   prefillFromSaved()
 })
 </script>
@@ -586,6 +635,37 @@ onMounted(async () => {
         </li>
         <li v-if="!searchHits.length" class="knowledge-hit-empty">没有命中片段。可先添加知识或切换检索模式。</li>
       </ol>
+    </div>
+
+    <div class="knowledge-tasks" v-if="tasks.length">
+      <h3>入库任务 <span>（{{ tasks.length }}）</span></h3>
+      <ul>
+        <li v-for="task in tasks" :key="task.taskId" class="knowledge-task-item">
+          <div class="knowledge-task-main">
+            <span class="knowledge-doc-title" :title="task.title">{{ task.title }}</span>
+            <span class="knowledge-task-meta">
+              {{ taskStatusLabels[task.status] ?? task.status }}
+              <template v-if="task.stage && (task.status === 'PROCESSING')"> · {{ taskStageLabels[task.stage] ?? task.stage }}</template>
+              <template v-if="task.status === 'COMPLETED'"> · {{ task.chunkCount }} 片</template>
+              · {{ formatTime(task.createdAt) }}
+            </span>
+          </div>
+          <div class="knowledge-task-progress" role="progressbar"
+               :aria-valuenow="task.progress" aria-valuemin="0" aria-valuemax="100">
+            <div class="knowledge-task-bar" :class="`task-${task.status.toLowerCase()}`"
+                 :style="{width: task.progress + '%'}"></div>
+          </div>
+          <div class="knowledge-task-side">
+            <span class="knowledge-task-pct">{{ task.progress }}%</span>
+            <button v-if="task.status === 'PENDING' || task.status === 'PROCESSING'"
+                    class="text-button danger-text" type="button" :aria-label="`取消任务 ${task.title}`"
+                    @click="cancelTask(task)">
+              <IconX :size="14"/>
+            </button>
+          </div>
+          <p v-if="task.error" class="knowledge-task-error">{{ task.error }}</p>
+        </li>
+      </ul>
     </div>
 
     <div class="knowledge-docs">
@@ -908,6 +988,93 @@ onMounted(async () => {
   margin: 6px 0 0;
   font-size: 11.5px;
   color: #6b7280;
+}
+
+.knowledge-tasks h3,
+.knowledge-docs h3 {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.knowledge-tasks ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.knowledge-task-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+}
+
+.knowledge-task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.knowledge-task-meta {
+  font-size: 11.5px;
+  color: #6b7280;
+}
+
+.knowledge-task-progress {
+  align-self: center;
+  width: 120px;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.knowledge-task-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: #3b82f6;
+  transition: width 0.4s ease;
+}
+
+.knowledge-task-bar.task-completed {
+  background: #10b981;
+}
+
+.knowledge-task-bar.task-failed {
+  background: #ef4444;
+}
+
+.knowledge-task-bar.task-cancelled {
+  background: #9ca3af;
+}
+
+.knowledge-task-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.knowledge-task-pct {
+  font-size: 11.5px;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.knowledge-task-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11px;
+  color: #b91c1c;
 }
 
 .chunk-param-row {
