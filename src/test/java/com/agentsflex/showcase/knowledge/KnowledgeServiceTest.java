@@ -139,6 +139,35 @@ class KnowledgeServiceTest {
     }
 
     /**
+     * 检索命中携带稳定引用号，工具输出以 [cN] 标注供模型引用与前端回跳。
+     */
+    @Test
+    void searchHitsCarryCitationIdsAndToolOutputMarksThem() {
+        service.addDocument("引用测试",
+                "引用溯源验证 独特标记引用输出 内容。", "MANUAL");
+
+        List<Map<String, Object>> hits = service.search("独特标记引用输出", 3);
+        assertThat(hits).isNotEmpty();
+        assertThat((Integer) hits.get(0).get("citeId")).isEqualTo(1);
+
+        String toolOutput = service.searchForTool("独特标记引用输出");
+        assertThat(toolOutput).contains("[c1]").contains("引用测试");
+    }
+
+    /**
+     * 重排默认关闭：不改变混合检索的排序行为（回归保护）。
+     */
+    @Test
+    void disabledRerankKeepsOriginalOrdering() {
+        Map<String, Object> doc = service.addDocument("重排回归",
+                "重排回归验证 独特标记默认关闭 内容。", "MANUAL");
+        List<Map<String, Object>> hits = service.search("独特标记默认关闭", 3);
+        assertThat(hits).isNotEmpty();
+        assertThat(hits.get(0).get("docId")).isEqualTo(doc.get("docId"));
+        assertThat(hits.get(0).containsKey("rerankScore")).isFalse();
+    }
+
+    /**
      * 切片预览按传入参数试算，不落库（文档数与切片数保持不变）。
      */
     @Test

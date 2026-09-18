@@ -27,6 +27,14 @@ public class KnowledgeProperties {
     private int ingestConcurrency = 2;
     /** 异步灌入排队上限；队列满时提交立即失败为 FAILED 任务。 */
     private int ingestQueueCapacity = 100;
+    /** 是否启用重排（OpenAI 兼容 /rerank 服务）。默认关闭，失败自动回退原始排序。 */
+    private boolean rerankEnabled = false;
+    /** rerank 服务地址：根地址（…/v1）或完整路由（…/v1/rerank）。 */
+    private String rerankEndpoint = "";
+    private String rerankApiKey = "";
+    private String rerankModel = "";
+    /** 重排前的过采样召回条数：先召回 N 条候选再重排截断（对齐 WeKnora chat_pipeline）。 */
+    private int rerankTopK = 20;
     private String embeddingEndpoint = "";
     private String embeddingApiKey = "";
     private String embeddingModel = "bge-m3";
@@ -109,6 +117,46 @@ public class KnowledgeProperties {
 
     public void setIngestQueueCapacity(int ingestQueueCapacity) {
         this.ingestQueueCapacity = ingestQueueCapacity;
+    }
+
+    public boolean isRerankEnabled() {
+        return rerankEnabled;
+    }
+
+    public void setRerankEnabled(boolean rerankEnabled) {
+        this.rerankEnabled = rerankEnabled;
+    }
+
+    public String getRerankEndpoint() {
+        return rerankEndpoint;
+    }
+
+    public void setRerankEndpoint(String rerankEndpoint) {
+        this.rerankEndpoint = rerankEndpoint;
+    }
+
+    public String getRerankApiKey() {
+        return rerankApiKey;
+    }
+
+    public void setRerankApiKey(String rerankApiKey) {
+        this.rerankApiKey = rerankApiKey;
+    }
+
+    public String getRerankModel() {
+        return rerankModel;
+    }
+
+    public void setRerankModel(String rerankModel) {
+        this.rerankModel = rerankModel;
+    }
+
+    public int getRerankTopK() {
+        return rerankTopK;
+    }
+
+    public void setRerankTopK(int rerankTopK) {
+        this.rerankTopK = rerankTopK;
     }
 
     public String getEmbeddingEndpoint() {

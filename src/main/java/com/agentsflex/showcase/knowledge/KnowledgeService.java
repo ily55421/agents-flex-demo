@@ -40,6 +40,8 @@ public class KnowledgeService {
     private final KnowledgeDocumentStore store;
     private final KnowledgeSettingsStore settings;
     private final KnowledgeVectorCache vectorCache;
+    /** 重排提供方：OpenAI 兼容 /rerank；未启用或失败时保持混合检索原始顺序。 */
+    private final RerankProvider rerankProvider;
     private final ObjectMapper mapper = new ObjectMapper();
     /** 结构化切片器：保护代码块/表格不被切断，并把标题路径写入切片元数据。 */
     private final MarkdownChunker chunker;
@@ -60,22 +62,25 @@ public class KnowledgeService {
      * @param store       DuckDB 文档元数据存储
      * @param settings    向量模型配置与自建预设的本地持久化
      * @param vectorCache embedding 向量持久化缓存；null 时向量直连不缓存（测试场景）
+     * @param rerankProvider 重排提供方
      */
     @org.springframework.beans.factory.annotation.Autowired
     public KnowledgeService(KnowledgeProperties properties, KnowledgeDocumentStore store,
-                            KnowledgeSettingsStore settings, KnowledgeVectorCache vectorCache) {
+                            KnowledgeSettingsStore settings, KnowledgeVectorCache vectorCache,
+                            RerankProvider rerankProvider) {
         this.properties = properties;
         this.store = store;
         this.settings = settings;
         this.vectorCache = vectorCache;
+        this.rerankProvider = rerankProvider;
         this.searchMode = parseMode(properties.getSearchMode());
         this.chunker = new MarkdownChunker(properties.getChunkSize(), properties.getChunkOverlap());
     }
 
-    /** 兼容旧构造：向量不缓存。 */
+    /** 兼容旧构造：向量不缓存，重排按配置开关。 */
     public KnowledgeService(KnowledgeProperties properties, KnowledgeDocumentStore store,
                             KnowledgeSettingsStore settings) {
-        this(properties, store, settings, null);
+        this(properties, store, settings, null, new RerankProvider(properties));
     }
 
     /**
@@ -279,7 +284,9 @@ public class KnowledgeService {
                 || "all".equalsIgnoreCase(namespace))
                 ? SearchOptions.builder().build()
                 : SearchOptions.builder().namespace(namespace.trim()).build();
-        List<MemoryResult> results = active.search(query.trim(), limit, options);
+        int candidateLimit = rerankProvider.available()
+                ? Math.max(limit, properties.getRerankTopK()) : limit;
+        List<MemoryResult> results = active.search(query.trim(), candidateLimit, options);
         List<Map<String, Object>> values = new ArrayList<>();
         for (MemoryResult result : results) {
             Map<String, Object> hit = new LinkedHashMap<>();
@@ -296,7 +303,27 @@ public class KnowledgeService {
             hit.put("mode", searchMode.name());
             values.add(hit);
         }
-        return values;
+        // 重排：对过采样候选调用 /rerank，按相关性重排序并回写分数；失败保持原始顺序
+        if (rerankProvider.available() && values.size() > 1) {
+            List<String> contents = new ArrayList<>(values.size());
+            for (Map<String, Object> hit : values) contents.add(String.valueOf(hit.get("content")));
+            float[] scores = rerankProvider.rerank(query.trim(), contents);
+            if (scores != null && scores.length == values.size()) {
+                for (int index = 0; index < values.size(); index++) {
+                    values.get(index).put("rerankScore", scores[index]);
+                }
+                values.sort((a, b) -> Float.compare(
+                        ((Number) b.get("rerankScore")).floatValue(),
+                        ((Number) a.get("rerankScore")).floatValue()));
+            }
+        }
+        // 截断到请求条数并分配稳定引用号：Agent 回答中的 [cN] 与此一一对应
+        List<Map<String, Object>> trimmed = values.size() > limit
+                ? new ArrayList<>(values.subList(0, limit)) : values;
+        for (int index = 0; index < trimmed.size(); index++) {
+            trimmed.get(index).put("citeId", index + 1);
+        }
+        return trimmed;
     }
 
     /** 兼容旧调用：全库检索。 */
@@ -337,8 +364,15 @@ public class KnowledgeService {
         if (hits.isEmpty()) return "知识库中没有找到与问题相关的资料。";
         StringBuilder text = new StringBuilder("知识库检索命中 " + hits.size() + " 条片段：\n");
         for (Map<String, Object> hit : hits) {
-            text.append("【").append(hit.get("title")).append(" · 片段")
-                    .append(hit.get("chunkIndex")).append(" · 相关度 ")
+            // [cN] 引用号：模型回答中引用片段时使用，前端可回跳到对应命中
+            text.append("[c").append(hit.get("citeId")).append("] 【")
+                    .append(hit.get("title"));
+            Object headingPath = hit.get("headingPath");
+            if (headingPath != null && !String.valueOf(headingPath).isBlank()) {
+                text.append(" · ").append(headingPath);
+            }
+            text.append(" · 片段").append(hit.get("chunkIndex"))
+                    .append(" · 相关度 ")
                     .append(String.format("%.3f", hit.get("score"))).append("】")
                     .append(hit.get("content")).append('\n');
         }
@@ -710,6 +744,9 @@ public class KnowledgeService {
         view.put("ready", memory != null);
         view.put("searchMode", searchMode.name());
         view.put("topK", properties.getTopK());
+        // 重排状态：开关+模型名供前端展示；未配置时检索保持混合排序
+        view.put("rerankConfigured", rerankProvider.available());
+        view.put("rerankModel", properties.isRerankEnabled() ? properties.getRerankModel() : null);
         // 用户提交过向量模型配置即视为“已配置”（即使连接失败），便于界面展示意图；
         // 实际生效与否由 provider 是否可用决定，失败原因始终在 lastError。
         view.put("embeddingConfigured", provider != null || configuredModel != null);

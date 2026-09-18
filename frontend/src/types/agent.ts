@@ -389,6 +389,10 @@ export interface KnowledgeHit {
   chunkIndex: string | null
   /** 命中片段所属的 Markdown 标题路径（如「切片策略 > 保护规则」）；无结构标题时为 null。 */
   headingPath: string | null
+  /** 稳定引用号（1 起）：Agent 回答中的 [cN] 与此对应。 */
+  citeId?: number
+  /** 重排相关性分数；重排未启用或失败时不存在。 */
+  rerankScore?: number
   content: string
   score: number
   mode: KnowledgeSearchMode

@@ -53,6 +53,12 @@ agents-flex:
     # 异步灌入流水线：并发线程数与排队上限；队列满时提交立即失败，不阻塞上传请求
     ingest-concurrency: ${KNOWLEDGE_INGEST_CONCURRENCY:2}
     ingest-queue-capacity: ${KNOWLEDGE_INGEST_QUEUE_CAPACITY:100}
+    # 重排（OpenAI 兼容 /rerank，如 Jina / 硅基流动）：默认关闭；失败自动回退混合检索原始排序
+    rerank-enabled: ${KNOWLEDGE_RERANK_ENABLED:false}
+    rerank-endpoint: ${RERANK_ENDPOINT:}
+    rerank-api-key: ${RERANK_API_KEY:}
+    rerank-model: ${RERANK_MODEL:}
+    rerank-top-k: ${KNOWLEDGE_RERANK_TOP_K:20}
     embedding-endpoint: ${EMBEDDING_ENDPOINT:}
     embedding-api-key: ${EMBEDDING_API_KEY:}
     embedding-model: ${EMBEDDING_MODEL:bge-m3}

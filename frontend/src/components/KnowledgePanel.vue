@@ -625,7 +625,10 @@ onMounted(async () => {
       <ol v-if="searched" class="knowledge-hits">
         <li v-for="(hit, index) in searchHits" :key="`${hit.docId}-${hit.chunkIndex}-${index}`">
           <div class="knowledge-hit-head">
-            <span>{{ hit.title }}</span>
+            <span>
+              <span v-if="hit.citeId" class="knowledge-hit-cite">[c{{ hit.citeId }}]</span>
+              {{ hit.title }}
+            </span>
             <span class="knowledge-hit-score">片段{{ hit.chunkIndex }} · {{ hit.score.toFixed(4) }}</span>
           </div>
           <p v-if="hit.headingPath" class="knowledge-hit-heading" :title="`来自小节：${hit.headingPath}`">
@@ -967,6 +970,18 @@ onMounted(async () => {
   font-size: 12px;
   color: #4b5563;
   line-height: 1.55;
+}
+
+.knowledge-hit-cite {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 4px;
 }
 
 .knowledge-hit-heading {
