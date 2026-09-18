@@ -450,6 +450,18 @@ export interface IngestTask {
   updatedAt: number
 }
 
+/** FAQ 条目视图（GET /api/knowledge/bases/{kbId}/faq/entries）。 */
+export interface FaqEntry {
+  entryId: string
+  docId: string
+  kbId: string
+  standardQuestion: string
+  similarQuestions: string[]
+  answer: string
+  createdAt: number
+  updatedAt: number
+}
+
 /** 知识库视图（GET /api/knowledge/bases）。 */
 export interface KnowledgeBase {
   kbId: string

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {IconDatabase, IconDeviceFloppy, IconEye, IconFileUpload, IconPencil, IconPlus, IconRefresh, IconScissors, IconSearch, IconTrash, IconUpload, IconX} from '@tabler/icons-vue'
 import {knowledgeApi} from '@/api/agent'
-import type {EmbeddingPreset, IngestTask, KnowledgeBase, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus, ParserDescriptor} from '@/types/agent'
+import type {EmbeddingPreset, FaqEntry, IngestTask, KnowledgeBase, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus, ParserDescriptor} from '@/types/agent'
 import ConfigFieldLabel from '@/components/ConfigFieldLabel.vue'
 
 const status = ref<KnowledgeStatus | null>(null)
@@ -28,8 +28,61 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const searchQuery = ref('')
 const searchTopK = ref(5)
 const searchNamespace = ref('all')
+const searchTags = ref('')
 const searchHits = ref<KnowledgeHit[]>([])
 const searched = ref(false)
+/** 检索与入库的知识库范围（提前声明：FAQ/任务逻辑均引用）。 */
+const selectedKb = ref('all')
+
+/** FAQ 管理：当前库的条目清单与新增表单（question_answer 模式）。 */
+const faqEntries = ref<FaqEntry[]>([])
+const faqForm = ref({standardQuestion: '', similarQuestions: '', answer: ''})
+
+async function loadFaqEntries() {
+  if (selectedKb.value === 'all') {
+    faqEntries.value = []
+    return
+  }
+  try {
+    faqEntries.value = await knowledgeApi.faqEntries(selectedKb.value)
+  } catch {
+    faqEntries.value = []
+  }
+}
+
+async function addFaqEntry() {
+  const form = faqForm.value
+  if (!form.standardQuestion.trim() || !form.answer.trim()) return
+  const similar = form.similarQuestions.split(/[,，\n]/).map(item => item.trim()).filter(Boolean)
+  try {
+    await knowledgeApi.addFaqEntry(selectedKb.value, {
+      standardQuestion: form.standardQuestion.trim(),
+      similarQuestions: similar,
+      answer: form.answer.trim(),
+      indexMode: 'question_answer',
+    })
+    form.standardQuestion = ''
+    form.similarQuestions = ''
+    form.answer = ''
+    notice.value = '已新增 FAQ 条目并物化入库'
+    await loadFaqEntries()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'FAQ 新增失败'
+  }
+}
+
+async function removeFaqEntry(entry: FaqEntry) {
+  if (!window.confirm(`删除 FAQ 条目「${entry.standardQuestion}」？`)) return
+  try {
+    await knowledgeApi.deleteFaqEntry(entry.kbId, entry.entryId)
+    notice.value = '已删除 FAQ 条目'
+    await Promise.all([loadFaqEntries(), loadDocuments()])
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'FAQ 删除失败'
+  }
+}
+
+watch(selectedKb, () => void loadFaqEntries())
 const multiFileInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
 const importProgress = ref('')
@@ -395,16 +448,16 @@ function rebuild() {
 function testSearch() {
   if (!searchQuery.value.trim()) return
   void run(async () => {
+    const tags = searchTags.value.split(/[,，]/).map(tag => tag.trim()).filter(Boolean)
     const result = await knowledgeApi.search(searchQuery.value, searchTopK.value,
-      searchNamespace.value, selectedKb.value)
+      searchNamespace.value, selectedKb.value, tags)
     searchHits.value = result.hits
     searched.value = true
   }).catch(() => undefined)
 }
 
-/** 多知识库：清单、选中范围与建库/删库。 */
+/** 多知识库：清单与建库/删库（selectedKb 在文件顶部声明）。 */
 const knowledgeBases = ref<KnowledgeBase[]>([])
-const selectedKb = ref('all')
 const newKbName = ref('')
 
 const selectedKbDeletable = computed(() => selectedKb.value.startsWith('kb-')
@@ -688,6 +741,8 @@ onMounted(async () => {
           <input id="kb-query" v-model.trim="searchQuery" maxlength="500" placeholder="例如：混合检索怎么做？"
                  @keydown.enter.prevent="testSearch"/>
           <input v-model.number="searchTopK" class="knowledge-topk" type="number" min="1" max="20" aria-label="TopK"/>
+          <input v-model.trim="searchTags" class="knowledge-tags-input" maxlength="120"
+                 placeholder="标签过滤（逗号分隔，可空）" aria-label="标签过滤"/>
           <button class="primary-button" type="button" :disabled="busy || !searchQuery" @click="testSearch">
             <IconSearch :size="16"/>检索
           </button>
@@ -710,6 +765,42 @@ onMounted(async () => {
         <li v-if="!searchHits.length" class="knowledge-hit-empty">没有命中片段。可先添加知识或切换检索模式。</li>
       </ol>
     </div>
+
+    <details class="knowledge-add" v-if="selectedKb !== 'all'">
+      <summary>FAQ 问答条目（{{ faqEntries.length }}）</summary>
+      <div class="field-block">
+        <ConfigFieldLabel for-id="kb-faq-q" text="标准问" help="FAQ 条目物化为一条文档，标准问、相似问与答案进入检索索引。"/>
+        <input id="kb-faq-q" v-model.trim="faqForm.standardQuestion" maxlength="200"
+               placeholder="例如：断路器如何操作"/>
+      </div>
+      <div class="field-block">
+        <ConfigFieldLabel for-id="kb-faq-s" text="相似问（逗号或换行分隔）" help="提高问法多样性召回；可空。"/>
+        <input id="kb-faq-s" v-model.trim="faqForm.similarQuestions" maxlength="500" placeholder="开关怎么用，如何合闸"/>
+      </div>
+      <div class="field-block">
+        <ConfigFieldLabel for-id="kb-faq-a" text="答案" help="question_answer 模式下答案进入索引；可先只录问题，稍后补答案。"/>
+        <textarea id="kb-faq-a" v-model="faqForm.answer" rows="3" placeholder="操作步骤或答复…"/>
+      </div>
+      <div class="knowledge-add-row">
+        <button class="primary-button" type="button" :disabled="busy || !faqForm.standardQuestion.trim() || !faqForm.answer.trim()"
+                @click="addFaqEntry">
+          <IconPlus :size="16"/>新增条目
+        </button>
+      </div>
+      <ul v-if="faqEntries.length" class="knowledge-faq-list">
+        <li v-for="entry in faqEntries" :key="entry.entryId">
+          <div class="knowledge-doc-main">
+            <span class="knowledge-doc-title">{{ entry.standardQuestion }}</span>
+            <span class="knowledge-doc-meta">{{ entry.answer }}</span>
+          </div>
+          <button class="text-button danger-text" type="button" :disabled="busy"
+                  :aria-label="`删除 FAQ ${entry.standardQuestion}`" @click="removeFaqEntry(entry)">
+            <IconTrash :size="15"/>
+          </button>
+        </li>
+      </ul>
+      <p v-else class="knowledge-upload-hint">当前库还没有 FAQ 条目。</p>
+    </details>
 
     <div class="knowledge-tasks" v-if="tasks.length">
       <h3>入库任务 <span>（{{ tasks.length }}）</span></h3>
@@ -1087,6 +1178,31 @@ onMounted(async () => {
   flex: 1;
   min-width: 160px;
   max-width: 260px;
+}
+
+.knowledge-tags-input {
+  min-width: 170px;
+}
+
+.knowledge-faq-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.knowledge-faq-list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 10px;
 }
 
 .knowledge-tasks h3,

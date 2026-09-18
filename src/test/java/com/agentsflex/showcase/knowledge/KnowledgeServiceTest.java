@@ -199,6 +199,54 @@ class KnowledgeServiceTest {
     }
 
     /**
+     * FAQ 条目：物化文档可被检索且答案入索引；删除条目后不再命中。
+     */
+    @Test
+    void faqEntriesAreSearchableAndDeletable() {
+        service.createKnowledgeBase("kb-faq", "问答库", null, 512, 80, 5);
+        Map<String, Object> entry = service.addFaqEntry("kb-faq", "断路器如何操作",
+                List.of("开关怎么用"), "先合上操作电源再按合闸按钮。", "question_answer");
+        assertThat(entry.get("entryId")).asString().startsWith("fe-");
+
+        // 标准问与相似问均可命中
+        assertThat(service.searchKb("kb-faq", "断路器如何操作", 5)).isNotEmpty();
+        assertThat(service.searchKb("kb-faq", "开关怎么用", 5)).isNotEmpty();
+
+        // 删除后不再命中
+        service.deleteFaqEntry(String.valueOf(entry.get("entryId")));
+        assertThat(service.searchKb("kb-faq", "断路器如何操作", 5)).isEmpty();
+    }
+
+    /**
+     * JSONL 双格式导入：FAQ 格式逐条建条目，旧格式回退问答事实文档。
+     */
+    @Test
+    void importsFaqAndLegacyJsonl() {
+        String jsonl = "{\"question\":\"如何停电操作\",\"similar\":[\"怎么断电\"],\"answer\":\"先办操作票。\"}\n"
+                + "{\"text\":\"旧格式事实 电压等级标记OLDX\",\"station\":\"A站\",\"category\":\"运行\"}\n";
+        Map<String, Object> result = service.importFaqJsonl(null, jsonl);
+        assertThat((Integer) result.get("faqEntries")).isEqualTo(1);
+        assertThat((Integer) result.get("legacyDocuments")).isEqualTo(1);
+
+        // FAQ 答案内容入索引（question_answer 模式）
+        assertThat(service.search("先办操作票", 5)).isNotEmpty();
+    }
+
+    /**
+     * 标签过滤：打标文档在匹配标签时命中、不匹配时不出现。
+     */
+    @Test
+    void tagFilterKeepsMatchingDocumentsOnly() {
+        Map<String, Object> tagged = service.addDocument("已打标", "安全规程 独特标记带标签 内容。", "MANUAL");
+        service.addDocument("未打标", "其他资料 独特标记无标签 内容。", "MANUAL");
+        service.setDocTags(String.valueOf(tagged.get("docId")), List.of("安全"));
+
+        List<Map<String, Object>> hits = service.search("独特标记", 10, null, List.of("安全"));
+        assertThat(hits).extracting(hit -> hit.get("title")).contains("已打标")
+                .doesNotContain("未打标");
+    }
+
+    /**
      * 切片预览按传入参数试算，不落库（文档数与切片数保持不变）。
      */
     @Test

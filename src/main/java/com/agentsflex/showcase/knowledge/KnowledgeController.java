@@ -242,6 +242,99 @@ public class KnowledgeController {
     }
 
     /**
+     * 设置文档标签（检索可按标签过滤）。
+     *
+     * @param docId 文档 ID
+     * @param body  tags：字符串数组
+     * @return 更新结果
+     */
+    @PutMapping("/documents/{docId}/tags")
+    public Map<String, Object> setDocumentTags(@PathVariable String docId,
+                                               @RequestBody Map<String, Object> body) {
+        List<String> tags = body.get("tags") instanceof java.util.List<?> rawTags
+                ? rawTags.stream().map(String::valueOf).map(String::trim).filter(s -> !s.isEmpty()).toList()
+                : List.of();
+        knowledgeService.setDocTags(docId, tags);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("docId", docId);
+        result.put("tags", tags);
+        return result;
+    }
+
+    /**
+     * @param kbId 知识库 ID
+     * @return 该库全部 FAQ 条目
+     */
+    @GetMapping("/bases/{kbId}/faq/entries")
+    public List<Map<String, Object>> listFaqEntries(@PathVariable String kbId) {
+        return knowledgeService.listFaqEntries(kbId);
+    }
+
+    /**
+     * 新增 FAQ 条目：物化为一条 FAQ 文档，检索粒度到条目。
+     *
+     * @param kbId 知识库 ID
+     * @param body standardQuestion / answer 必填；similarQuestions 数组可选；indexMode 可选
+     * @return 条目视图
+     */
+    @PostMapping("/bases/{kbId}/faq/entries")
+    public Map<String, Object> addFaqEntry(@PathVariable String kbId,
+                                           @RequestBody Map<String, Object> body) {
+        String standard = body.get("standardQuestion") == null ? null
+                : String.valueOf(body.get("standardQuestion"));
+        String answer = body.get("answer") == null ? null : String.valueOf(body.get("answer"));
+        List<String> similar = body.get("similarQuestions") instanceof java.util.List<?> raw
+                ? raw.stream().map(String::valueOf).toList() : List.of();
+        String indexMode = body.get("indexMode") == null ? "question_answer"
+                : String.valueOf(body.get("indexMode"));
+        return knowledgeService.addFaqEntry(kbId, standard, similar, answer, indexMode);
+    }
+
+    /**
+     * 更新 FAQ 条目：条目表与物化文档同步重建。
+     */
+    @PutMapping("/bases/{kbId}/faq/entries/{entryId}")
+    public Map<String, Object> updateFaqEntry(@PathVariable String kbId,
+                                              @PathVariable String entryId,
+                                              @RequestBody Map<String, Object> body) {
+        String standard = body.get("standardQuestion") == null ? null
+                : String.valueOf(body.get("standardQuestion"));
+        String answer = body.get("answer") == null ? null : String.valueOf(body.get("answer"));
+        List<String> similar = body.get("similarQuestions") instanceof java.util.List<?> raw
+                ? raw.stream().map(String::valueOf).toList() : List.of();
+        String indexMode = body.get("indexMode") == null ? "question_answer"
+                : String.valueOf(body.get("indexMode"));
+        return knowledgeService.updateFaqEntry(entryId, standard, similar, answer, indexMode);
+    }
+
+    /**
+     * 删除 FAQ 条目：连同物化文档一并删除。
+     */
+    @DeleteMapping("/bases/{kbId}/faq/entries/{entryId}")
+    public Map<String, Object> deleteFaqEntry(@PathVariable String kbId,
+                                              @PathVariable String entryId) {
+        knowledgeService.deleteFaqEntry(entryId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deleted", true);
+        result.put("entryId", entryId);
+        return result;
+    }
+
+    /**
+     * 导入 JSONL 问答库：FAQ 格式（question/similar/answer）逐条建条目；
+     * 旧格式（text/station/category）整体作为问答事实文档入库。
+     *
+     * @param kbId 知识库 ID
+     * @param body jsonl：JSONL 全文
+     * @return 导入计数
+     */
+    @PostMapping("/bases/{kbId}/faq/import")
+    public Map<String, Object> importFaqJsonl(@PathVariable String kbId,
+                                              @RequestBody Map<String, String> body) {
+        return knowledgeService.importFaqJsonl(kbId, body.get("jsonl"));
+    }
+
+    /**
      * 切片预览：按给定窗口参数试算切片结果，不落库。
      *
      * <p>对齐 WeKnora 的 /chunker/preview 调试能力：调整 chunkSize/overlap 前先看效果，
@@ -321,10 +414,12 @@ public class KnowledgeController {
         String kbId = body.get("kbId") == null ? null : String.valueOf(body.get("kbId"));
         String namespace = body.get("namespace") == null ? null : String.valueOf(body.get("namespace"));
         List<Map<String, Object>> hits;
+        java.util.List<String> tagFilter = body.get("tags") instanceof java.util.List<?> rawTags
+                ? rawTags.stream().map(String::valueOf).toList() : java.util.List.of();
         if (kbId != null && !kbId.isBlank() && !"all".equalsIgnoreCase(kbId)) {
-            hits = knowledgeService.searchKb(kbId, query, topK);
+            hits = knowledgeService.searchKb(kbId, query, topK, tagFilter);
         } else {
-            hits = knowledgeService.search(query, topK, namespace);
+            hits = knowledgeService.search(query, topK, namespace, tagFilter);
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("query", query);

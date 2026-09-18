@@ -56,6 +56,11 @@ public class KnowledgeDocumentStore {
         } catch (Exception ignored) {
             // 列已存在时 ALTER 报错，忽略即可。
         }
+        try {
+            jdbc.execute("ALTER TABLE knowledge_document ADD COLUMN tags VARCHAR");
+        } catch (Exception ignored) {
+            // 列已存在时 ALTER 报错，忽略即可。
+        }
     }
 
     /** @return 共享的 JdbcTemplate（KnowledgeBaseStore 建库表复用同一数据源） */
@@ -119,7 +124,7 @@ public class KnowledgeDocumentStore {
     public List<Map<String, Object>> list() {
         List<Map<String, Object>> values = jdbc.query(
                 "SELECT doc_id, title, source, chunk_count, char_count, embedding_signature,"
-                        + " created_at, knowledge_base_id FROM knowledge_document ORDER BY created_at DESC",
+                        + " created_at, knowledge_base_id, tags FROM knowledge_document ORDER BY created_at DESC",
                 (rs, rowNum) -> {
                     Map<String, Object> row = new LinkedHashMap<>();
                     row.put("docId", rs.getString("doc_id"));
@@ -129,6 +134,7 @@ public class KnowledgeDocumentStore {
                     row.put("charCount", rs.getLong("char_count"));
                     row.put("embeddingSignature", rs.getString("embedding_signature"));
                     row.put("kbId", rs.getString("knowledge_base_id"));
+                    row.put("tags", rs.getString("tags"));
                     row.put("createdAt", rs.getLong("created_at"));
                     return row;
                 });
@@ -176,6 +182,35 @@ public class KnowledgeDocumentStore {
     /** @return 目标库中已存在的 doc_id 集合（导入计数用） */
     public java.util.Set<String> existingDocIds() {
         return new java.util.HashSet<>(jdbc.queryForList("SELECT doc_id FROM knowledge_document", String.class));
+    }
+
+    /**
+     * 设置文档标签（逗号分隔存储；对齐 WeKnora 的标签过滤语义但简化为单列）。
+     *
+     * @param docId 文档 ID
+     * @param tags  标签列表；空列表清空标签
+     */
+    public void setTags(String docId, List<String> tags) {
+        String joined = tags == null || tags.isEmpty() ? null : String.join(",", tags);
+        jdbc.update("UPDATE knowledge_document SET tags = ? WHERE doc_id = ?", joined, docId);
+    }
+
+    /**
+     * @param docId 文档 ID
+     * @return 文档标签列表；无标签返回空表
+     */
+    public List<String> tagsOf(String docId) {
+        List<String> rows = jdbc.query("SELECT tags FROM knowledge_document WHERE doc_id = ?",
+                (rs, rowNum) -> {
+                    String raw = rs.getString(1);
+                    return raw == null || raw.isBlank() ? "" : raw;
+                }, docId);
+        if (rows.isEmpty() || rows.get(0).isEmpty()) return Collections.emptyList();
+        List<String> tags = new ArrayList<>();
+        for (String tag : rows.get(0).split(",")) {
+            if (!tag.isBlank()) tags.add(tag.trim());
+        }
+        return tags;
     }
 
     /**

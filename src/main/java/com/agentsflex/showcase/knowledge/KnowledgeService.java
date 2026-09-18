@@ -44,6 +44,8 @@ public class KnowledgeService {
     private final RerankProvider rerankProvider;
     /** 多知识库存储：两级 namespace（kbId/docId）与库级检索参数。 */
     private final KnowledgeBaseStore kbStore;
+    /** FAQ 条目存储：结构化字段与文档物化的映射。 */
+    private final KnowledgeFaqStore faqStore;
     private final ObjectMapper mapper = new ObjectMapper();
     /** 结构化切片器：保护代码块/表格不被切断，并把标题路径写入切片元数据。 */
     private final MarkdownChunker chunker;
@@ -77,6 +79,7 @@ public class KnowledgeService {
         this.vectorCache = vectorCache;
         this.rerankProvider = rerankProvider;
         this.kbStore = kbStore;
+        this.faqStore = new KnowledgeFaqStore(store.getJdbcTemplate());
         this.searchMode = parseMode(properties.getSearchMode());
         this.chunker = new MarkdownChunker(properties.getChunkSize(), properties.getChunkOverlap());
     }
@@ -303,14 +306,19 @@ public class KnowledgeService {
     }
 
     /**
-     * 混合检索知识库；namespace 为空时跨全部文档。
-     *
-     * @param query     查询文本
-     * @param topK      返回条数；小于等于 0 时使用配置默认值
-     * @param namespace 限定检索的文档 namespace（docId）；null 或 all 表示全部
-     * @return 命中片段列表，含内容、标题、来源与分数
+     * 混合检索知识库；namespace 为空时跨全部文档（tag 过滤见重载）。
      */
     public List<Map<String, Object>> search(String query, int topK, String namespace) {
+        return search(query, topK, namespace, List.of());
+    }
+
+    /**
+     * 混合检索 + 标签过滤：命中文档需满足任一请求标签（对齐 WeKnora TagIDs OR 过滤）。
+     *
+     * @param tags  标签过滤；空表示不过滤
+     */
+    public List<Map<String, Object>> search(String query, int topK, String namespace,
+                                            List<String> tags) {
         if (query == null || query.trim().isEmpty()) return Collections.emptyList();
         RogueMemory active = requireMemory();
         int limit = topK > 0 ? topK : properties.getTopK();
@@ -363,10 +371,33 @@ public class KnowledgeService {
         // 截断到请求条数并分配稳定引用号：Agent 回答中的 [cN] 与此一一对应
         List<Map<String, Object>> trimmed = values.size() > limit
                 ? new ArrayList<>(values.subList(0, limit)) : values;
+        trimmed = filterByTags(trimmed, tags);
         for (int index = 0; index < trimmed.size(); index++) {
             trimmed.get(index).put("citeId", index + 1);
         }
         return trimmed;
+    }
+
+    /**
+     * 标签过滤：命中文档需满足任一请求标签；hit.docId 反查文档标签。
+     *
+     * @param hits 候选命中
+     * @param tags 请求标签；空表示不过滤
+     * @return 过滤后的命中
+     */
+    private List<Map<String, Object>> filterByTags(List<Map<String, Object>> hits,
+                                                   List<String> tags) {
+        if (tags == null || tags.isEmpty()) return hits;
+        List<Map<String, Object>> kept = new ArrayList<>();
+        for (Map<String, Object> hit : hits) {
+            List<String> docTags = store.tagsOf(String.valueOf(hit.get("docId")));
+            boolean match = docTags.stream().anyMatch(tags::contains);
+            if (match) {
+                hit.put("tags", docTags);
+                kept.add(hit);
+            }
+        }
+        return kept;
     }
 
     /** 兼容旧调用：全库检索。 */
@@ -400,15 +431,161 @@ public class KnowledgeService {
         return kbStore.list();
     }
 
+    // ===== FAQ 知识库（对齐 WeKnora：标准问 + 相似问 + 答案，条目粒度检索）=====
+
+    private volatile boolean faqReady;
+
+    /** FAQ 表懒初始化：测试环境不走 Spring 的 @PostConstruct。 */
+    private void ensureFaqStore() {
+        if (!faqReady) {
+            faqStore.ensureSchema();
+            faqReady = true;
+        }
+    }
+
+    /** FAQ 条目物化为文档时的内容：question_answer 含答案，question_only 仅问题面。 */
+    private static String faqContent(String standardQuestion, List<String> similarQuestions,
+                                     String answer, String indexMode) {
+        StringBuilder content = new StringBuilder("标准问：").append(standardQuestion).append('\n');
+        if (similarQuestions != null && !similarQuestions.isEmpty()) {
+            content.append("相似问：").append(String.join("；", similarQuestions)).append('\n');
+        }
+        if (!"question_only".equals(indexMode) && answer != null && !answer.isBlank()) {
+            content.append("答案：").append(answer);
+        }
+        return content.toString();
+    }
+
+    /**
+     * 新增 FAQ 条目：写入条目表并物化为一条 FAQ 文档（复用切片/检索/清单链路）。
+     *
+     * @param kbId          目标知识库
+     * @param standardQuestion 标准问（必填）
+     * @param similarQuestions 相似问列表；可空
+     * @param answer        答案（必填）
+     * @param indexMode     question_answer（默认，含答案入索引）/ question_only（仅问题面）
+     * @return 条目视图（含 entryId / docId）
+     */
+    public synchronized Map<String, Object> addFaqEntry(String kbId, String standardQuestion,
+                                                        List<String> similarQuestions,
+                                                        String answer, String indexMode) {
+        ensureFaqStore();
+        kbStore.bootstrapDefault();
+        if (standardQuestion == null || standardQuestion.trim().isEmpty()) {
+            throw new IllegalArgumentException("标准问不能为空");
+        }
+        if (answer == null || answer.trim().isEmpty()) {
+            throw new IllegalArgumentException("答案不能为空");
+        }
+        String entryId = "fe-" + UUID.randomUUID();
+        Map<String, Object> doc = addDocumentTo(kbId, standardQuestion.trim(),
+                faqContent(standardQuestion.trim(), similarQuestions, answer, indexMode), "FAQ");
+        String docId = String.valueOf(doc.get("docId"));
+        return faqStore.insert(entryId, docId,
+                kbId == null || kbId.isBlank() ? KnowledgeBaseStore.DEFAULT_KB_ID : kbId,
+                standardQuestion.trim(), similarQuestions, answer.trim());
+    }
+
+    /**
+     * 更新 FAQ 条目：条目表与物化文档同步重建（检索立即生效）。
+     *
+     * @return 更新后的条目视图
+     */
+    public synchronized Map<String, Object> updateFaqEntry(String entryId, String standardQuestion,
+                                                           List<String> similarQuestions,
+                                                           String answer, String indexMode) {
+        ensureFaqStore();
+        Map<String, Object> existing = faqStore.find(entryId);
+        if (existing == null) throw new IllegalArgumentException("FAQ 条目不存在: " + entryId);
+        String docId = String.valueOf(existing.get("docId"));
+        updateDocument(docId, standardQuestion,
+                faqContent(standardQuestion, similarQuestions, answer, indexMode));
+        faqStore.update(entryId, standardQuestion, similarQuestions, answer);
+        return faqStore.find(entryId);
+    }
+
+    /** 删除 FAQ 条目：连同物化文档一并删除。 */
+    public synchronized void deleteFaqEntry(String entryId) {
+        ensureFaqStore();
+        Map<String, Object> existing = faqStore.find(entryId);
+        if (existing == null) return;
+        deleteDocument(String.valueOf(existing.get("docId")));
+        faqStore.delete(entryId);
+    }
+
+    /**
+     * @param kbId 知识库 ID
+     * @return 该库全部 FAQ 条目
+     */
+    public List<Map<String, Object>> listFaqEntries(String kbId) {
+        ensureFaqStore();
+        kbStore.bootstrapDefault();
+        return faqStore.listByKb(kbId);
+    }
+
+    /**
+     * 导入 JSONL 问答库（双格式兼容）：
+     * FAQ 格式 {@code {question, similar[], answer}} 逐条建 FAQ 条目；
+     * 旧格式 {@code {text, station, category}} 整体作为一篇问答事实文档入库。
+     *
+     * @param kbId     目标知识库
+     * @param jsonlText JSONL 全文
+     * @return 导入计数（faqEntries / legacyDocuments）
+     */
+    public synchronized Map<String, Object> importFaqJsonl(String kbId, String jsonlText) {
+        ensureFaqStore();
+        kbStore.bootstrapDefault();
+        if (jsonlText == null || jsonlText.trim().isEmpty()) {
+            throw new IllegalArgumentException("JSONL 内容不能为空");
+        }
+        int faqEntries = 0;
+        int legacyDocs = 0;
+        List<String> legacyLines = new ArrayList<>();
+        for (String line : jsonlText.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) continue;
+            Map<String, Object> record = parseJsonLine(trimmed);
+            if (record == null) continue;
+            Object question = record.get("question");
+            Object answer = record.get("answer");
+            if (question instanceof String q && !q.isBlank()
+                    && answer instanceof String a && !a.isBlank()) {
+                @SuppressWarnings("unchecked")
+                List<String> similar = record.get("similar") instanceof List<?>
+                        ? (List<String>) record.get("similar") : List.of();
+                addFaqEntry(kbId, q.trim(), similar, a.trim(), "question_answer");
+                faqEntries++;
+            } else {
+                legacyLines.add(trimmed);
+            }
+        }
+        if (!legacyLines.isEmpty()) {
+            addJsonlDocument("问答事实库", String.join("\n", legacyLines));
+            legacyDocs++;
+        }
+        if (faqEntries == 0 && legacyDocs == 0) {
+            throw new IllegalArgumentException("JSONL 中没有可导入的条目（需要 question/answer 或 text 字段）");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("faqEntries", faqEntries);
+        result.put("legacyDocuments", legacyDocs);
+        return result;
+    }
+
     /**
      * 限定单个知识库检索：逐文档 namespace 检索后合并排序（对齐 WeKnora 库内检索）。
-     *
-     * @param kbId  知识库 ID
-     * @param query 查询文本
-     * @param topK  返回条数；小于等于 0 时用库级 topK
-     * @return 命中片段（含 citeId / kbId）
      */
     public List<Map<String, Object>> searchKb(String kbId, String query, int topK) {
+        return searchKb(kbId, query, topK, List.of());
+    }
+
+    /**
+     * 库内检索 + 标签过滤。
+     *
+     * @param tags 标签过滤；空表示不过滤
+     */
+    public List<Map<String, Object>> searchKb(String kbId, String query, int topK,
+                                              List<String> tags) {
         if (query == null || query.trim().isEmpty()) return Collections.emptyList();
         kbStore.bootstrapDefault();
         Map<String, Object> kb = kbStore.get(kbId);
@@ -440,10 +617,21 @@ public class KnowledgeService {
             values.add(hit);
             if (values.size() >= limit) break;
         }
+        values = filterByTags(values, tags);
         for (int index = 0; index < values.size(); index++) {
             values.get(index).put("citeId", index + 1);
         }
         return values;
+    }
+
+    /**
+     * 设置文档标签（检索可用标签过滤）。
+     *
+     * @param docId 文档 ID
+     * @param tags  标签列表；空列表清空
+     */
+    public synchronized void setDocTags(String docId, List<String> tags) {
+        store.setTags(docId, tags == null ? List.of() : tags);
     }
 
     /**

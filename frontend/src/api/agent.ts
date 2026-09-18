@@ -10,6 +10,7 @@ import type {
     GraphSummary,
     GraphView,
     ChunkPreviewItem,
+    FaqEntry,
     IngestTask,
     KnowledgeBase,
     KnowledgeDocument,
@@ -166,12 +167,32 @@ export const knowledgeApi = {
     /** 删除文档（RogueMemory namespace + DuckDB 元数据）。 */
     deleteDocument: (docId: string) =>
         request<{ deleted: boolean; docId: string }>(KNOWLEDGE_API_ROOT, `/documents/${docId}`, {method: 'DELETE'}),
-    /** 检索测试：kbId 优先于 namespace（文档范围）；两者都缺省为全库检索。 */
-    search: (query: string, topK: number, namespace?: string, kbId?: string) =>
+    /** 检索测试：kbId 优先于 namespace（文档范围）；tags 为标签过滤（任一匹配）。 */
+    search: (query: string, topK: number, namespace?: string, kbId?: string, tags?: string[]) =>
         request<{ query: string; kbId: string; namespace: string; hits: KnowledgeHit[] }>(
             KNOWLEDGE_API_ROOT, '/search', {
             method: 'POST',
-            body: JSON.stringify({query, topK, namespace, kbId}),
+            body: JSON.stringify({query, topK, namespace, kbId, tags}),
+        }),
+    /** FAQ 条目清单。 */
+    faqEntries: (kbId: string) =>
+        request<FaqEntry[]>(KNOWLEDGE_API_ROOT, `/bases/${kbId}/faq/entries`),
+    /** 新增 FAQ 条目：物化为一条 FAQ 文档，检索粒度到条目。 */
+    addFaqEntry: (kbId: string, payload: {
+        standardQuestion: string; similarQuestions?: string[]; answer: string; indexMode?: string
+    }) => request<FaqEntry>(KNOWLEDGE_API_ROOT, `/bases/${kbId}/faq/entries`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }),
+    /** 删除 FAQ 条目：连同物化文档一并删除。 */
+    deleteFaqEntry: (kbId: string, entryId: string) =>
+        request<{ deleted: boolean }>(KNOWLEDGE_API_ROOT, `/bases/${kbId}/faq/entries/${entryId}`,
+            {method: 'DELETE'}),
+    /** 设置文档标签（检索可按标签过滤）。 */
+    setDocTags: (docId: string, tags: string[]) =>
+        request<{ docId: string; tags: string[] }>(KNOWLEDGE_API_ROOT, `/documents/${docId}/tags`, {
+            method: 'PUT',
+            body: JSON.stringify({tags}),
         }),
     /** 知识库清单（含默认库）。 */
     bases: () => request<KnowledgeBase[]>(KNOWLEDGE_API_ROOT, '/bases'),
