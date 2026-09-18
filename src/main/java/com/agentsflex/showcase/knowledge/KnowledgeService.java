@@ -41,7 +41,8 @@ public class KnowledgeService {
     private final KnowledgeSettingsStore settings;
     private final KnowledgeVectorCache vectorCache;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final TextChunker chunker = new TextChunker();
+    /** 结构化切片器：保护代码块/表格不被切断，并把标题路径写入切片元数据。 */
+    private final MarkdownChunker chunker;
     private final AtomicBoolean seeding = new AtomicBoolean();
 
     private volatile RogueMemory memory;
@@ -68,6 +69,7 @@ public class KnowledgeService {
         this.settings = settings;
         this.vectorCache = vectorCache;
         this.searchMode = parseMode(properties.getSearchMode());
+        this.chunker = new MarkdownChunker(properties.getChunkSize(), properties.getChunkOverlap());
     }
 
     /** 兼容旧构造：向量不缓存。 */
@@ -228,17 +230,19 @@ public class KnowledgeService {
             throw new IllegalArgumentException("文档内容不能为空");
         }
         RogueMemory active = requireMemory();
-        List<String> chunks = chunker.chunk(content);
+        List<MarkdownChunker.MarkdownChunk> chunks = chunker.chunk(content);
         if (chunks.isEmpty()) throw new IllegalArgumentException("文档没有可入库的有效内容");
         String docId = "kb-" + UUID.randomUUID();
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("title", title == null || title.trim().isEmpty() ? "未命名文档" : title.trim());
         metadata.put("source", source);
         try {
-            for (int index = 0; index < chunks.size(); index++) {
+            for (MarkdownChunker.MarkdownChunk chunk : chunks) {
                 Map<String, String> chunkMeta = new LinkedHashMap<>(metadata);
-                chunkMeta.put("chunkIndex", String.valueOf(index));
-                active.add(chunks.get(index), chunkMeta, docId);
+                chunkMeta.put("chunkIndex", String.valueOf(chunk.getIndex()));
+                // 标题路径写入切片元数据：检索命中后可展示「来自哪一节」
+                chunkMeta.put("headingPath", chunk.getHeadingPath());
+                active.add(chunk.getContent(), chunkMeta, docId);
             }
         } catch (RuntimeException error) {
             this.lastError = error.getMessage();
@@ -284,6 +288,9 @@ public class KnowledgeService {
             hit.put("source", result.getMetadata() == null ? null : result.getMetadata().get("source"));
             hit.put("chunkIndex", result.getMetadata() == null ? null
                     : result.getMetadata().get("chunkIndex"));
+            // 标题路径：让调用方知道命中片段来自哪一节（结构化切片写入）
+            hit.put("headingPath", result.getMetadata() == null ? null
+                    : result.getMetadata().get("headingPath"));
             hit.put("content", result.getContent());
             hit.put("score", result.getScore());
             hit.put("mode", searchMode.name());
@@ -295,6 +302,20 @@ public class KnowledgeService {
     /** 兼容旧调用：全库检索。 */
     public List<Map<String, Object>> search(String query, int topK) {
         return search(query, topK, null);
+    }
+
+    /**
+     * 切片预览：按给定窗口参数试算切片结果，不写入任何索引。
+     *
+     * @param content    待切分正文
+     * @param chunkSize  窗口字符数；小于等于 0 时使用配置默认值
+     * @param overlap    重叠字符数；非法组合时回退默认值
+     * @return 每片的序号、标题路径、字符数与正文
+     */
+    public List<Map<String, Object>> previewChunking(String content, int chunkSize, int overlap) {
+        int resolvedSize = chunkSize > 0 ? chunkSize : properties.getChunkSize();
+        int resolvedOverlap = overlap >= 0 ? overlap : properties.getChunkOverlap();
+        return chunker.preview(content, resolvedSize, resolvedOverlap);
     }
 
     /**
@@ -444,7 +465,7 @@ public class KnowledgeService {
         }
         RogueMemory active = requireMemory();
         String resolvedTitle = title == null || title.trim().isEmpty() ? titleOf(docId) : title.trim();
-        List<String> chunks = chunker.chunk(content.trim());
+        List<MarkdownChunker.MarkdownChunk> chunks = chunker.chunk(content.trim());
         if (chunks.isEmpty()) throw new IllegalArgumentException("文档没有可入库的有效内容");
         String previousTitle = titleOf(docId);
         String source = sourceOf(docId);
@@ -455,10 +476,11 @@ public class KnowledgeService {
         metadata.put("title", resolvedTitle);
         metadata.put("source", source == null ? "MANUAL" : source);
         try {
-            for (int index = 0; index < chunks.size(); index++) {
+            for (MarkdownChunker.MarkdownChunk chunk : chunks) {
                 Map<String, String> chunkMeta = new LinkedHashMap<>(metadata);
-                chunkMeta.put("chunkIndex", String.valueOf(index));
-                active.add(chunks.get(index), chunkMeta, docId);
+                chunkMeta.put("chunkIndex", String.valueOf(chunk.getIndex()));
+                chunkMeta.put("headingPath", chunk.getHeadingPath());
+                active.add(chunk.getContent(), chunkMeta, docId);
             }
         } catch (RuntimeException error) {
             this.lastError = error.getMessage();
@@ -798,16 +820,17 @@ public class KnowledgeService {
             String title = titleObj == null ? docId : String.valueOf(titleObj);
             Object sourceObj = row.get("source");
             String source = sourceObj == null ? "MANUAL" : String.valueOf(sourceObj);
-            List<String> chunks = chunker.chunk(content.trim());
+            List<MarkdownChunker.MarkdownChunk> chunks = chunker.chunk(content.trim());
             if (chunks.isEmpty()) continue;
             Map<String, String> metadata = new LinkedHashMap<>();
             metadata.put("title", title);
             metadata.put("source", source);
             try {
-                for (int index = 0; index < chunks.size(); index++) {
+                for (MarkdownChunker.MarkdownChunk chunk : chunks) {
                     Map<String, String> chunkMeta = new LinkedHashMap<>(metadata);
-                    chunkMeta.put("chunkIndex", String.valueOf(index));
-                    active.add(chunks.get(index), chunkMeta, docId);
+                    chunkMeta.put("chunkIndex", String.valueOf(chunk.getIndex()));
+                    chunkMeta.put("headingPath", chunk.getHeadingPath());
+                    active.add(chunk.getContent(), chunkMeta, docId);
                 }
             } catch (RuntimeException error) {
                 this.lastError = "索引重建失败（" + title + "）：" + error.getMessage();

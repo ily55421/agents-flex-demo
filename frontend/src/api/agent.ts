@@ -9,13 +9,16 @@ import type {
     GraphStation,
     GraphSummary,
     GraphView,
+    ChunkPreviewItem,
     KnowledgeDocument,
     KnowledgeHit,
     KnowledgeSearchMode,
     KnowledgeStatus,
     KnowledgeSyncResult,
+    KnowledgeUploadResult,
     ModelProfile,
     ModelStatus,
+    ParserDescriptor,
     TraceView,
 } from '@/types/agent'
 
@@ -111,8 +114,8 @@ export const knowledgeApi = {
             method: 'POST',
             body: JSON.stringify({title, content}),
         }),
-    /** 上传 .txt/.md 文件解析入库；multipart 不能带 JSON Content-Type。 */
-    uploadDocument: async (file: File, title?: string): Promise<KnowledgeDocument> => {
+    /** 上传文件解析入库（支持 pdf/docx/xlsx/pptx/html/md/txt 等 11 种格式，由 /parsers 驱动）。 */
+    uploadDocument: async (file: File, title?: string): Promise<KnowledgeUploadResult> => {
         const form = new FormData()
         form.append('file', file)
         if (title) form.append('title', title)
@@ -121,8 +124,17 @@ export const knowledgeApi = {
             const body = (await response.json().catch(() => null)) as { message?: string } | null
             throw new Error(body?.message || `上传失败 (${response.status})`)
         }
-        return response.json() as Promise<KnowledgeDocument>
+        return response.json() as Promise<KnowledgeUploadResult>
     },
+    /** 支持的入库格式与对应解析器；驱动上传控件 accept 与格式提示。 */
+    parsers: () => request<ParserDescriptor[]>(KNOWLEDGE_API_ROOT, '/parsers'),
+    /** 切片预览：按窗口参数试算切片，不落库；用于调整切片参数前先看效果。 */
+    previewChunking: (content: string, chunkSize?: number, overlap?: number) =>
+        request<{ chunkSize: number; overlap: number; chunks: ChunkPreviewItem[] }>(
+            KNOWLEDGE_API_ROOT, '/chunker/preview', {
+                method: 'POST',
+                body: JSON.stringify({content, chunkSize, overlap}),
+            }),
     /** 删除文档（RogueMemory namespace + DuckDB 元数据）。 */
     deleteDocument: (docId: string) =>
         request<{ deleted: boolean; docId: string }>(KNOWLEDGE_API_ROOT, `/documents/${docId}`, {method: 'DELETE'}),

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import {computed, onMounted, ref} from 'vue'
-import {IconDatabase, IconDeviceFloppy, IconEye, IconFileUpload, IconPencil, IconRefresh, IconSearch, IconTrash, IconUpload, IconX} from '@tabler/icons-vue'
+import {IconDatabase, IconDeviceFloppy, IconEye, IconFileUpload, IconPencil, IconRefresh, IconScissors, IconSearch, IconTrash, IconUpload, IconX} from '@tabler/icons-vue'
 import {knowledgeApi} from '@/api/agent'
-import type {EmbeddingPreset, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus} from '@/types/agent'
+import type {EmbeddingPreset, KnowledgeDocument, KnowledgeHit, KnowledgeSearchMode, KnowledgeStatus, ParserDescriptor} from '@/types/agent'
 import ConfigFieldLabel from '@/components/ConfigFieldLabel.vue'
 
 const status = ref<KnowledgeStatus | null>(null)
@@ -10,6 +10,16 @@ const documents = ref<KnowledgeDocument[]>([])
 const busy = ref(false)
 const error = ref<string | null>(null)
 const notice = ref<string | null>(null)
+
+/** 后端支持的入库格式；驱动上传控件 accept 与格式提示，加载失败回退到文本格式。 */
+const supportedParsers = ref<ParserDescriptor[]>([])
+const fallbackAccept = '.txt,.md,.markdown,.jsonl'
+const uploadAccept = computed(() => supportedParsers.value.length
+  ? supportedParsers.value.map(item => `.${item.extension}`).join(',')
+  : fallbackAccept)
+const uploadHint = computed(() => supportedParsers.value.length
+  ? `支持 ${supportedParsers.value.map(item => item.extension).join(' / ')}`
+  : '支持 .txt / .md / .jsonl')
 
 const newTitle = ref('')
 const newContent = ref('')
@@ -98,6 +108,61 @@ function closeDocDialog() {
   docDialog.value.open = false
 }
 
+/** 切片预览弹窗状态：加载文档原文 → 试算切片 → 可调窗口参数重算。 */
+const chunkDialog = ref<{
+  open: boolean
+  title: string
+  content: string
+  chunkSize: number
+  overlap: number
+  loading: boolean
+  error: string | null
+  chunks: { index: number; headingPath: string; charCount: number; content: string }[]
+}>({open: false, title: '', content: '', chunkSize: 512, overlap: 80, loading: false, error: null, chunks: []})
+
+/** 打开切片预览：拉取原文并按默认参数试算（对齐后端 /chunker/preview，不落库）。 */
+async function openChunkPreview(doc: KnowledgeDocument) {
+  chunkDialog.value = {open: true, title: doc.title, content: '', chunkSize: 512, overlap: 80,
+    loading: true, error: null, chunks: []}
+  try {
+    const detail = await knowledgeApi.getDocument(doc.docId)
+    if (detail.content == null || !detail.content.trim()) {
+      throw new Error('该文档没有保存原始全文（旧版本导入），无法预览切片')
+    }
+    chunkDialog.value.content = detail.content
+    await runChunkPreview()
+  } catch (cause) {
+    chunkDialog.value.error = cause instanceof Error ? cause.message : '切片预览失败'
+  } finally {
+    chunkDialog.value.loading = false
+  }
+}
+
+/** 用当前弹窗参数重新试算切片。 */
+async function rerunChunkPreview() {
+  if (!chunkDialog.value.content.trim()) return
+  await runChunkPreview()
+}
+
+/** 按弹窗参数调用后端试算。 */
+async function runChunkPreview() {
+  chunkDialog.value.loading = true
+  chunkDialog.value.error = null
+  try {
+    const result = await knowledgeApi.previewChunking(chunkDialog.value.content,
+      chunkDialog.value.chunkSize, chunkDialog.value.overlap)
+    chunkDialog.value.chunks = result.chunks
+  } catch (cause) {
+    chunkDialog.value.error = cause instanceof Error ? cause.message : '切片试算失败'
+  } finally {
+    chunkDialog.value.loading = false
+  }
+}
+
+function closeChunkDialog() {
+  chunkDialog.value.open = false
+}
+
 const sourceLabels: Record<string, string> = {MANUAL: '文本录入', FILE: '文件上传', BUILTIN: '内置示例'}
 const modeLabels: Record<string, string> = {HYBRID: '混合检索', VECTOR_ONLY: '纯向量', KEYWORD_ONLY: '纯关键词'}
 
@@ -115,6 +180,15 @@ const embForm = ref<{presetKey: string; endpoint: string; apiKey: string; model:
 })
 /** 用户自建预设（服务端持久化）。 */
 const userPresets = ref<EmbeddingPreset[]>([])
+
+/** 拉取后端支持的入库格式；失败时保留回退 accept，不阻断面板。 */
+async function loadParsers() {
+  try {
+    supportedParsers.value = await knowledgeApi.parsers()
+  } catch {
+    supportedParsers.value = []
+  }
+}
 
 /** 拉取用户自建预设；失败不阻断面板，仅影响快捷填充。 */
 async function loadPresets() {
@@ -248,7 +322,14 @@ function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  void run(() => knowledgeApi.uploadDocument(file), `已解析并入库：${file.name}`).catch(() => undefined)
+  void run(async () => {
+    const doc = await knowledgeApi.uploadDocument(file)
+    // 附带解析元数据：页数/表数/页数让用户确认解析器吃到了完整内容
+    const extra = doc.pageCount ? `，${doc.pageCount} 页`
+      : doc.sheetCount ? `，${doc.sheetCount} 个工作表`
+      : doc.slideCount ? `，${doc.slideCount} 页幻灯片` : ''
+    notice.value = `已解析并入库：${file.name}${extra}（${doc.chunkCount} 片）`
+  }).catch(() => undefined)
   input.value = ''
 }
 
@@ -337,7 +418,7 @@ function formatTime(millis: number) {
 }
 
 onMounted(async () => {
-  await loadPresets()
+  await Promise.all([loadPresets(), loadParsers()])
   await reload().catch(() => undefined)
   prefillFromSaved()
 })
@@ -384,13 +465,14 @@ onMounted(async () => {
           <IconFileUpload :size="16"/>上传单文件
         </button>
         <button class="secondary-button" type="button" :disabled="busy || importing" @click="multiFileInput?.click()">
-          <IconFileUpload :size="16"/>批量导入（.md/.txt/.jsonl）
+          <IconFileUpload :size="16"/>批量导入（多格式）
         </button>
-        <input ref="fileInput" type="file" accept=".txt,.md,.markdown,.jsonl,text/markdown,text/plain"
+        <input ref="fileInput" type="file" :accept="uploadAccept"
                class="knowledge-file-input" aria-label="上传知识文件" @change="onFileChange"/>
-        <input ref="multiFileInput" type="file" accept=".txt,.md,.markdown,.jsonl,text/markdown,text/plain"
+        <input ref="multiFileInput" type="file" :accept="uploadAccept"
                class="knowledge-file-input" multiple aria-label="批量导入知识文件" @change="onMultiFileChange"/>
       </div>
+      <p class="knowledge-upload-hint">解析支持：{{ uploadHint }}。PDF / Word / 表格 / 幻灯片 / HTML 会先归一为 Markdown 再切片入库。</p>
       <p v-if="importProgress" class="knowledge-import-progress">{{ importProgress }}</p>
     </details>
 
@@ -497,6 +579,9 @@ onMounted(async () => {
             <span>{{ hit.title }}</span>
             <span class="knowledge-hit-score">片段{{ hit.chunkIndex }} · {{ hit.score.toFixed(4) }}</span>
           </div>
+          <p v-if="hit.headingPath" class="knowledge-hit-heading" :title="`来自小节：${hit.headingPath}`">
+            {{ hit.headingPath }}
+          </p>
           <p>{{ hit.content }}</p>
         </li>
         <li v-if="!searchHits.length" class="knowledge-hit-empty">没有命中片段。可先添加知识或切换检索模式。</li>
@@ -518,6 +603,10 @@ onMounted(async () => {
             <button class="text-button" type="button" :disabled="busy"
                     :aria-label="`预览文档 ${doc.title}`" @click="previewDocument(doc)">
               <IconEye :size="15"/>
+            </button>
+            <button class="text-button" type="button" :disabled="busy"
+                    :aria-label="`切片预览 ${doc.title}`" title="切片预览（不落库）" @click="openChunkPreview(doc)">
+              <IconScissors :size="15"/>
             </button>
             <button class="text-button danger-text" type="button" :disabled="busy"
                     :aria-label="`删除文档 ${doc.title}`" @click="removeDocument(doc)">
@@ -574,6 +663,50 @@ onMounted(async () => {
           </template>
           <button class="text-button" type="button" :disabled="docDialog.saving" @click="closeDocDialog">关闭</button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="chunkDialog.open" class="doc-dialog-backdrop" @click.self="closeChunkDialog">
+      <div class="doc-dialog" role="dialog" aria-modal="true" aria-label="切片预览">
+        <div class="doc-dialog-head">
+          <h3>切片预览：{{ chunkDialog.title }}</h3>
+          <button class="text-button" type="button" :disabled="chunkDialog.loading" @click="closeChunkDialog"
+                  aria-label="关闭">
+            <IconX :size="16"/>
+          </button>
+        </div>
+        <div class="chunk-param-row">
+          <label>窗口
+            <input v-model.number="chunkDialog.chunkSize" type="number" min="64" max="4096" step="32"/>
+          </label>
+          <label>重叠
+            <input v-model.number="chunkDialog.overlap" type="number" min="0" max="512" step="8"/>
+          </label>
+          <button class="secondary-button" type="button" :disabled="chunkDialog.loading"
+                  @click="rerunChunkPreview">
+            <IconRefresh :size="15"/>重新试算
+          </button>
+        </div>
+        <p class="dialog-note">预览只试算不落库；实际入库使用同样的结构化切片（保护代码块/表格，标题路径写入元数据）。修改窗口后需重建或编辑保存才会生效。</p>
+        <p v-if="chunkDialog.error" class="doc-dialog-error" role="alert">{{ chunkDialog.error }}</p>
+        <p v-else-if="chunkDialog.loading" class="dialog-note">试算中…</p>
+        <p v-else-if="chunkDialog.chunks.length" class="dialog-note">
+          共 {{ chunkDialog.chunks.length }} 片 ·
+          平均 {{ Math.round(chunkDialog.chunks.reduce((sum, chunk) => sum + chunk.charCount, 0) / chunkDialog.chunks.length) }} 字/片
+        </p>
+        <ol v-else class="chunk-list">
+          <li class="knowledge-hit-empty">没有可用切片。</li>
+        </ol>
+        <ol class="chunk-list">
+          <li v-for="chunk in chunkDialog.chunks" :key="chunk.index" class="chunk-item">
+            <div class="chunk-head">
+              <span>#{{ chunk.index }}</span>
+              <span v-if="chunk.headingPath" class="chunk-heading">{{ chunk.headingPath }}</span>
+              <span class="chunk-size">{{ chunk.charCount }} 字</span>
+            </div>
+            <pre>{{ chunk.content }}</pre>
+          </li>
+        </ol>
       </div>
     </div>
   </Teleport>
@@ -754,6 +887,102 @@ onMounted(async () => {
   font-size: 12px;
   color: #4b5563;
   line-height: 1.55;
+}
+
+.knowledge-hit-heading {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 1px 8px;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-upload-hint {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: #6b7280;
+}
+
+.chunk-param-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.chunk-param-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chunk-param-row input {
+  width: 84px;
+}
+
+.chunk-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.chunk-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.chunk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #6b7280;
+}
+
+.chunk-head span:first-child {
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.chunk-heading {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 1px 8px;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chunk-size {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.chunk-item pre {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
 }
 
 .knowledge-docs ul {

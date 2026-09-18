@@ -387,6 +387,8 @@ export interface KnowledgeHit {
   title: string | null
   source: string | null
   chunkIndex: string | null
+  /** 命中片段所属的 Markdown 标题路径（如「切片策略 > 保护规则」）；无结构标题时为 null。 */
+  headingPath: string | null
   content: string
   score: number
   mode: KnowledgeSearchMode
@@ -400,6 +402,29 @@ export interface KnowledgeSyncResult {
   vectorsSkipped: number
   indexRefreshed: boolean
   lastError: string | null
+}
+
+/** 支持的入库格式与对应解析器（GET /api/knowledge/parsers）。 */
+export interface ParserDescriptor {
+  extension: string
+  parser: string
+}
+
+/** 文件上传入库结果：文档元数据 + 解析器附带的格式信息（页数/表数/页演示数）。 */
+export interface KnowledgeUploadResult extends KnowledgeDocument {
+  parser?: string
+  pageCount?: string
+  sheetCount?: string
+  slideCount?: string
+  format?: string
+}
+
+/** 切片预览单项：序号、标题路径、字符数与正文（POST /api/knowledge/chunker/preview）。 */
+export interface ChunkPreviewItem {
+  index: number
+  headingPath: string
+  charCount: number
+  content: string
 }
 
 // SessionSummary 是同一 conversationId 的全部 Turn 在会话列表中的聚合摘要。

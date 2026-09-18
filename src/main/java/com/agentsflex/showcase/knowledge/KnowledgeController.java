@@ -146,6 +146,32 @@ public class KnowledgeController {
     }
 
     /**
+     * 切片预览：按给定窗口参数试算切片结果，不落库。
+     *
+     * <p>对齐 WeKnora 的 /chunker/preview 调试能力：调整 chunkSize/overlap 前先看效果，
+     * 避免"改了参数 → 重建索引 → 才发现切碎了"的来回成本。</p>
+     *
+     * @param body content 必填；chunkSize / overlap 可选，缺省使用服务端配置
+     * @return 每片的序号、标题路径、字符数与正文
+     */
+    @PostMapping("/chunker/preview")
+    public Map<String, Object> previewChunking(@RequestBody Map<String, Object> body) {
+        String content = body.get("content") == null ? null : String.valueOf(body.get("content"));
+        if (content == null || content.trim().isEmpty()) {
+            throw new IllegalArgumentException("切片预览内容不能为空");
+        }
+        int chunkSize = body.get("chunkSize") instanceof Number number
+                ? number.intValue() : properties.getChunkSize();
+        int overlap = body.get("overlap") instanceof Number number
+                ? number.intValue() : properties.getChunkOverlap();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("chunkSize", chunkSize);
+        result.put("overlap", overlap);
+        result.put("chunks", knowledgeService.previewChunking(content, chunkSize, overlap));
+        return result;
+    }
+
+    /**
      * 读取文档原始全文与元数据，供前端预览查看。
      * 旧版本导入的文档可能没有保存原始全文（contentAvailable=false），
      * 此时前端应提示用户粘贴新内容覆盖保存或删除后重新导入。

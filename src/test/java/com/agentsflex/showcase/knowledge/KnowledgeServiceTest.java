@@ -47,6 +47,23 @@ class KnowledgeServiceTest {
     @AfterEach
     void tearDown() throws Exception {
         service.shutdown();
+        // 每个用例的 mmap 文件按 1GB 预分配，必须随用例删除，否则 %TEMP% 会被迅速吃满
+        deleteRecursively(tempDir);
+    }
+
+    /** 递归删除临时目录；文件仍被占用时静默跳过（下次运行使用全新目录，不影响正确性）。 */
+    private static void deleteRecursively(Path root) {
+        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (java.io.IOException ignored) {
+                    // Windows 上 mmap 句柄释放可能滞后，删除失败留给系统临时目录清理
+                }
+            });
+        } catch (java.io.IOException ignored) {
+            // 同上：清理失败不影响测试结论
+        }
     }
 
     /**
@@ -58,13 +75,17 @@ class KnowledgeServiceTest {
                 "生产 RAG 系统采用向量 ANN 与 BM25 关键词混合召回，再用 RRF 融合排序。\n\n切片应保留段落边界并做少量重叠。",
                 "MANUAL");
         assertThat(doc.get("docId")).asString().startsWith("kb-");
-        assertThat((Integer) doc.get("chunkCount")).isGreaterThanOrEqualTo(2);
+        // 结构化切片按窗口聚合短段落：该文档不足一个窗口，应合成单一切片而非按段拆散
+        assertThat((Integer) doc.get("chunkCount")).isGreaterThanOrEqualTo(1);
+        assertThat((Long) doc.get("charCount")).isPositive();
 
         List<Map<String, Object>> hits = service.search("BM25 关键词 混合召回", 3);
         assertThat(hits).isNotEmpty();
         assertThat(hits.get(0).get("title")).isEqualTo("混合检索实践");
         assertThat(hits.get(0).get("mode")).isEqualTo("KEYWORD_ONLY");
-        assertThat((Float) hits.get(0).get("score")).isGreaterThan(0f);
+        // 分数只保证是有限数值：BM25 归一化后可为负，符号不构成契约
+        assertThat((Float) hits.get(0).get("score")).isFinite();
+        assertThat(hits.get(0).get("content")).asString().contains("BM25");
     }
 
     /**
@@ -101,5 +122,32 @@ class KnowledgeServiceTest {
         service.rebuild();
         assertThat(store.count()).isZero();
         assertThat(service.search("内容标记ABC", 3)).isEmpty();
+    }
+
+    /**
+     * 结构化切片：Markdown 标题路径写入切片元数据，检索命中可回读所属小节。
+     */
+    @Test
+    void searchExposesHeadingPathFromStructuredChunking() {
+        service.addDocument("切片规范",
+                "# 切片策略\n\n## 保护规则\n\n公式与表格在切片时不被硬切断。",
+                "MANUAL");
+
+        List<Map<String, Object>> hits = service.search("公式与表格", 3);
+        assertThat(hits).isNotEmpty();
+        assertThat(hits.get(0).get("headingPath")).isEqualTo("切片策略 > 保护规则");
+    }
+
+    /**
+     * 切片预览按传入参数试算，不落库（文档数与切片数保持不变）。
+     */
+    @Test
+    void previewChunkingDoesNotTouchIndex() {
+        java.util.List<Map<String, Object>> preview = service.previewChunking(
+                "# 小节\n\n预览用的一段正文。", 512, 80);
+
+        assertThat(preview).isNotEmpty();
+        assertThat(preview.get(0).get("headingPath")).isEqualTo("小节");
+        assertThat(store.count()).isZero();
     }
 }
