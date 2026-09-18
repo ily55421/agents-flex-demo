@@ -242,15 +242,27 @@ public final class ResearchAgentFactory {
 
         // RAG 知识库检索工具：走 RogueMemory 混合检索（向量 ANN + BM25），命中片段带标题、
         // 片段序号与相关度分数返回，模型引用时可标注来源。知识库未配置时返回说明文本。
-        // Agent 可绑定知识库范围（knowledgeNamespace），实现按文档检索。
+        // 对齐 WeKnora knowledge_search：支持 1-5 个语义 query（去重合并）与按知识库路由（kb_id）。
         final String knowledgeNamespace = request.getKnowledgeNamespace();
         Tool knowledgeTool = Tool.builder("search_knowledge",
-                        "检索本地 RAG 知识库，返回与问题最相关的资料片段（含来源与相关度）")
+                        "检索本地 RAG 知识库，返回与问题最相关的资料片段（含 [cN] 引用号、标题路径与相关度）；"
+                                + "可用 more_queries 提供换行/分号分隔的补充查询角度，用 kb_id 限定单个知识库")
                 .addParameter(Parameter.builder().name("query").type("string").required(true).build())
-                .function(arguments -> knowledgeService == null
-                        ? "知识库服务未启用。"
-                        : knowledgeService.searchForTool(String.valueOf(arguments.get("query")),
-                        knowledgeNamespace))
+                .addParameter(Parameter.builder().name("more_queries").type("string")
+                        .description("补充查询角度，换行或分号分隔，最多 4 个；可省略").build())
+                .addParameter(Parameter.builder().name("kb_id").type("string")
+                        .description("限定检索的知识库 ID；可省略（全库）").build())
+                .function(arguments -> {
+                    if (knowledgeService == null) return "知识库服务未启用。";
+                    Object more = arguments.get("more_queries");
+                    List<String> moreQueries = more == null || String.valueOf(more).isBlank()
+                            ? List.of()
+                            : Arrays.stream(String.valueOf(more).split("[;；\\n]"))
+                                    .map(String::trim).filter(item -> !item.isEmpty()).toList();
+                    Object kbId = arguments.get("kb_id");
+                    return knowledgeService.searchForToolMulti(String.valueOf(arguments.get("query")),
+                            moreQueries, kbId == null ? null : String.valueOf(kbId));
+                })
                 .build();
 
         // 电力拓扑图谱查询工具：走内嵌 Neo4j，按站名/设备名/线路名返回邻接关系，

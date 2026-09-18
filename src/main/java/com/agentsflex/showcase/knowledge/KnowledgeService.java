@@ -665,6 +665,63 @@ public class KnowledgeService {
             return "知识库检索失败：" + error.getMessage();
         }
         if (hits.isEmpty()) return "知识库中没有找到与问题相关的资料。";
+        return renderToolHits(hits);
+    }
+
+    /**
+     * 供 Agent 工具的多查询检索（对齐 WeKnora knowledge_search 的 1-5 语义 query）：
+     * 各查询独立检索后按 docId+chunkIndex 去重合并（同片段取最高分），全局排序截断。
+     *
+     * @param primaryQuery 主查询
+     * @param moreQueries  补充查询列表；可空
+     * @param kbId         限定知识库；null 或 all 为全库
+     * @return 多行文本；每行一个 [cN] 引用片段
+     */
+    public String searchForToolMulti(String primaryQuery, List<String> moreQueries, String kbId) {
+        if (memory == null) return "知识库尚未初始化。";
+        List<String> queries = new ArrayList<>();
+        if (primaryQuery != null && !primaryQuery.isBlank()) queries.add(primaryQuery.trim());
+        if (moreQueries != null) {
+            for (String extra : moreQueries) {
+                if (extra != null && !extra.isBlank() && !queries.contains(extra.trim())) {
+                    queries.add(extra.trim());
+                }
+            }
+        }
+        if (queries.isEmpty()) return "未提供检索问题。";
+        int perQueryTopK = Math.max(properties.getTopK(), 5);
+        boolean scopedKb = kbId != null && !kbId.isBlank() && !"all".equalsIgnoreCase(kbId);
+        java.util.LinkedHashMap<String, Map<String, Object>> merged = new java.util.LinkedHashMap<>();
+        try {
+            for (String current : queries) {
+                List<Map<String, Object>> hits = scopedKb
+                        ? searchKb(kbId, current, perQueryTopK)
+                        : search(current, perQueryTopK);
+                for (Map<String, Object> hit : hits) {
+                    String key = hit.get("docId") + "#" + hit.get("chunkIndex");
+                    merged.merge(key, hit, (oldHit, newHit) ->
+                            ((Number) oldHit.get("score")).floatValue()
+                                    >= ((Number) newHit.get("score")).floatValue() ? oldHit : newHit);
+                }
+            }
+        } catch (RuntimeException error) {
+            return "知识库检索失败：" + error.getMessage();
+        }
+        if (merged.isEmpty()) return "知识库中没有找到与问题相关的资料。";
+        List<Map<String, Object>> hits = new ArrayList<>(merged.values());
+        hits.sort((a, b) -> Float.compare(((Number) b.get("score")).floatValue(),
+                ((Number) a.get("score")).floatValue()));
+        if (hits.size() > properties.getTopK()) {
+            hits = new ArrayList<>(hits.subList(0, properties.getTopK()));
+        }
+        for (int index = 0; index < hits.size(); index++) {
+            hits.get(index).put("citeId", index + 1);
+        }
+        return renderToolHits(hits);
+    }
+
+    /** 渲染工具输出：[cN] 引用号 + 标题/标题路径/片段号/相关度 + 正文。 */
+    private static String renderToolHits(List<Map<String, Object>> hits) {
         StringBuilder text = new StringBuilder("知识库检索命中 " + hits.size() + " 条片段：\n");
         for (Map<String, Object> hit : hits) {
             // [cN] 引用号：模型回答中引用片段时使用，前端可回跳到对应命中

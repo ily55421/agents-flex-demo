@@ -139,6 +139,21 @@ class KnowledgeServiceTest {
     }
 
     /**
+     * 多查询工具检索：多角度查询去重合并，同一片段只出现一次且引用号连续。
+     */
+    @Test
+    void multiQuerySearchMergesDuplicates() {
+        service.addDocument("多角度", "混合检索实践 独特标记多角度 内容。", "MANUAL");
+
+        String output = service.searchForToolMulti("独特标记多角度",
+                List.of("混合检索实践", "独特标记多角度"), null);
+        assertThat(output).contains("[c1]");
+        // 同片段被两个查询命中后应去重为一条
+        long markerCount = output.chars().filter(ch -> ch == '[').count();
+        org.assertj.core.api.Assertions.assertThat(markerCount).isEqualTo(1);
+    }
+
+    /**
      * 检索命中携带稳定引用号，工具输出以 [cN] 标注供模型引用与前端回跳。
      */
     @Test
