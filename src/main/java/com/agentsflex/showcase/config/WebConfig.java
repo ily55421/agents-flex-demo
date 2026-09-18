@@ -1,7 +1,9 @@
 package com.agentsflex.showcase.config;
 
+import com.agentsflex.showcase.knowledge.KnowledgeApiKeyInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -10,6 +12,30 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+
+    private final org.springframework.beans.factory.ObjectProvider<KnowledgeApiKeyInterceptor> knowledgeApiKeyInterceptor;
+
+    /**
+     * @param knowledgeApiKeyInterceptor 知识库 API Key 拦截器（轻量多租户能力位）；
+     *                                   用 ObjectProvider 以兼容切片测试上下文
+     */
+    public WebConfig(org.springframework.beans.factory.ObjectProvider<KnowledgeApiKeyInterceptor> knowledgeApiKeyInterceptor) {
+        this.knowledgeApiKeyInterceptor = knowledgeApiKeyInterceptor;
+    }
+
+    /**
+     * 注册知识库 API Key 拦截器：带 Bearer Key 按 RETRIEVE/MANAGE 能力位放行，
+     * 无 Key 视为本机 Demo 模式全放行（保持现有使用体验）。拦截器不存在时跳过注册。
+     *
+     * @param registry 拦截器注册器
+     */
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        KnowledgeApiKeyInterceptor interceptor = knowledgeApiKeyInterceptor.getIfAvailable();
+        if (interceptor != null) {
+            registry.addInterceptor(interceptor).addPathPatterns("/api/knowledge/**");
+        }
+    }
 
     /**
      * 注册 /api 下的 CORS 规则，仅开放 Demo 使用的 GET、POST、PUT、DELETE 和预检请求。

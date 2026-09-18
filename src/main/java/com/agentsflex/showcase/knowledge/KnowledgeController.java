@@ -43,6 +43,7 @@ public class KnowledgeController {
     private final DocumentParserRegistry parserRegistry;
     private final IngestPipeline ingestPipeline;
     private final KnowledgeBaseStore kbStore;
+    private final KnowledgeApiKeyStore apiKeyStore;
     private final ObjectMapper mapper;
 
     /**
@@ -53,6 +54,7 @@ public class KnowledgeController {
      * @param parserRegistry   文档解析器注册表（多格式上传入库）
      * @param ingestPipeline   异步灌入流水线（任务状态机）
      * @param kbStore          多知识库存储
+     * @param apiKeyStore      API Key 存储（轻量多租户能力位）
      * @param mapper           Jackson 序列化器（快照导出/导入）
      */
     public KnowledgeController(KnowledgeService knowledgeService,
@@ -62,6 +64,7 @@ public class KnowledgeController {
                                DocumentParserRegistry parserRegistry,
                                IngestPipeline ingestPipeline,
                                KnowledgeBaseStore kbStore,
+                               KnowledgeApiKeyStore apiKeyStore,
                                ObjectMapper mapper) {
         this.knowledgeService = knowledgeService;
         this.documentStore = documentStore;
@@ -70,7 +73,42 @@ public class KnowledgeController {
         this.parserRegistry = parserRegistry;
         this.ingestPipeline = ingestPipeline;
         this.kbStore = kbStore;
+        this.apiKeyStore = apiKeyStore;
         this.mapper = mapper;
+    }
+
+    /**
+     * 创建 API Key：明文仅本次响应返回一次。
+     *
+     * @param body capability：RETRIEVE（只读，默认）/ MANAGE（全部读写）
+     * @return 含明文 key 的视图
+     */
+    @PostMapping("/api-keys")
+    public Map<String, Object> createApiKey(@RequestBody Map<String, String> body) {
+        return apiKeyStore.create(body.get("capability"));
+    }
+
+    /**
+     * @return 全部 API Key（脱敏：仅前缀与能力位）
+     */
+    @GetMapping("/api-keys")
+    public List<Map<String, Object>> listApiKeys() {
+        return apiKeyStore.list();
+    }
+
+    /**
+     * @param keyId Key ID
+     * @return 删除结果
+     */
+    @DeleteMapping("/api-keys/{keyId}")
+    public Map<String, Object> deleteApiKey(@PathVariable String keyId) {
+        if (!apiKeyStore.delete(keyId)) {
+            throw new IllegalArgumentException("API Key 不存在: " + keyId);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deleted", true);
+        result.put("keyId", keyId);
+        return result;
     }
 
     /**
