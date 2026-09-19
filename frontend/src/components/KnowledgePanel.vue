@@ -766,8 +766,12 @@ onMounted(async () => {
       </ol>
     </div>
 
-    <details class="knowledge-add" v-if="selectedKb !== 'all'">
-      <summary>FAQ 问答条目（{{ faqEntries.length }}）</summary>
+    <details class="knowledge-add">
+      <summary>FAQ 问答条目<template v-if="selectedKb !== 'all'">（{{ faqEntries.length }}）</template></summary>
+      <p v-if="selectedKb === 'all'" class="knowledge-upload-hint">
+        FAQ 条目按知识库维护。先在上方「知识库范围」选择一个具体库，即可查看与新增该库的条目。
+      </p>
+      <template v-else>
       <div class="field-block">
         <ConfigFieldLabel for-id="kb-faq-q" text="标准问" help="FAQ 条目物化为一条文档，标准问、相似问与答案进入检索索引。"/>
         <input id="kb-faq-q" v-model.trim="faqForm.standardQuestion" maxlength="200"
@@ -800,6 +804,7 @@ onMounted(async () => {
         </li>
       </ul>
       <p v-else class="knowledge-upload-hint">当前库还没有 FAQ 条目。</p>
+      </template>
     </details>
 
     <div class="knowledge-tasks" v-if="tasks.length">
@@ -1069,56 +1074,64 @@ onMounted(async () => {
 }
 
 .knowledge-error {
-  font-size: 12px;
-  color: #b91c1c;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
+  font-size: var(--font-caption);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-radius: var(--radius-lg);
   padding: 6px 10px;
 }
 
 .knowledge-notice {
-  font-size: 12px;
-  color: #047857;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  border-radius: 8px;
+  font-size: var(--font-caption);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: var(--radius-lg);
   padding: 6px 10px;
 }
 
 .knowledge-import-progress {
   margin: 6px 0 0;
-  font-size: 12px;
-  color: #047857;
+  font-size: var(--font-caption);
+  color: var(--accent);
 }
 
 .dialog-note {
   margin: 6px 0 0;
-  font-size: 11.5px;
-  color: #6b7280;
+  font-size: var(--font-caption);
+  color: var(--text-muted);
   line-height: 1.5;
 }
 
 .knowledge-namespace {
-  max-width: 180px;
-  flex: none;
+  flex: 0 1 190px;
+  min-width: 0;
 }
 
 .knowledge-search-row {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
 }
 
 .knowledge-search-row input[type=text],
 .knowledge-search-row input:not([type]) {
-  flex: 1;
+  flex: 1 1 220px;
   min-width: 0;
 }
 
 .knowledge-topk {
-  width: 52px;
-  flex: none;
+  flex: 0 0 56px;
+  width: 56px;
+}
+
+/* 检索按钮不参与拉伸，避免窄屏下被压成竖排文字。 */
+.knowledge-search-row > button,
+.knowledge-kb-bar > button {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .knowledge-hits {
@@ -1135,43 +1148,43 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-caption);
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text);
 }
 
 .knowledge-hit-score {
   font-weight: 400;
-  color: #6b7280;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
 .knowledge-hits p {
   margin: 2px 0 0;
-  font-size: 12px;
-  color: #4b5563;
+  font-size: var(--font-caption);
+  color: var(--text-soft);
   line-height: 1.55;
 }
 
 .knowledge-hit-cite {
   display: inline-block;
-  font-size: 10.5px;
+  font-size: var(--font-micro);
   font-weight: 600;
-  color: #047857;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  border-radius: 4px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: var(--radius-sm);
   padding: 0 4px;
   margin-right: 4px;
 }
 
 .knowledge-hit-heading {
   margin: 2px 0 0;
-  font-size: 11px;
-  color: #1d4ed8;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
+  font-size: var(--font-micro);
+  color: var(--text-soft);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
   padding: 1px 8px;
   display: inline-block;
   max-width: 100%;
@@ -1182,8 +1195,8 @@ onMounted(async () => {
 
 .knowledge-upload-hint {
   margin: 6px 0 0;
-  font-size: 11.5px;
-  color: #6b7280;
+  font-size: var(--font-caption);
+  color: var(--text-muted);
 }
 
 .knowledge-kb-bar {
@@ -1194,13 +1207,14 @@ onMounted(async () => {
 }
 
 .knowledge-kb-bar input {
-  flex: 1;
-  min-width: 160px;
+  flex: 1 1 180px;
+  min-width: 0;
   max-width: 260px;
 }
 
 .knowledge-tags-input {
-  min-width: 170px;
+  flex: 1 1 170px;
+  min-width: 0;
 }
 
 .knowledge-faq-list {
@@ -1219,16 +1233,16 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 6px 10px;
 }
 
 .knowledge-tasks h3,
 .knowledge-docs h3 {
   margin: 4px 0 8px;
-  font-size: 13px;
-  color: #1f2937;
+  font-size: var(--font-small);
+  color: var(--text);
 }
 
 .knowledge-tasks ul {
@@ -1243,8 +1257,8 @@ onMounted(async () => {
 }
 
 .knowledge-task-item {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 8px 10px;
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1259,36 +1273,36 @@ onMounted(async () => {
 }
 
 .knowledge-task-meta {
-  font-size: 11.5px;
-  color: #6b7280;
+  font-size: var(--font-caption);
+  color: var(--text-muted);
 }
 
 .knowledge-task-progress {
   align-self: center;
   width: 120px;
   height: 6px;
-  background: #e5e7eb;
-  border-radius: 999px;
+  background: var(--border);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 
 .knowledge-task-bar {
   height: 100%;
-  border-radius: 999px;
-  background: #3b82f6;
+  border-radius: var(--radius-pill);
+  background: var(--retry);
   transition: width 0.4s ease;
 }
 
 .knowledge-task-bar.task-completed {
-  background: #10b981;
+  background: var(--success);
 }
 
 .knowledge-task-bar.task-failed {
-  background: #ef4444;
+  background: var(--danger);
 }
 
 .knowledge-task-bar.task-cancelled {
-  background: #9ca3af;
+  background: var(--border-strong);
 }
 
 .knowledge-task-side {
@@ -1299,24 +1313,24 @@ onMounted(async () => {
 }
 
 .knowledge-task-pct {
-  font-size: 11.5px;
-  color: #4b5563;
+  font-size: var(--font-caption);
+  color: var(--text-soft);
   white-space: nowrap;
 }
 
 .knowledge-task-error {
   grid-column: 1 / -1;
   margin: 0;
-  font-size: 11px;
-  color: #b91c1c;
+  font-size: var(--font-micro);
+  color: var(--danger);
 }
 
 .chunk-param-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
-  color: #4b5563;
+  font-size: var(--font-caption);
+  color: var(--text-soft);
 }
 
 .chunk-param-row label {
@@ -1341,8 +1355,8 @@ onMounted(async () => {
 }
 
 .chunk-item {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 8px 10px;
 }
 
@@ -1350,20 +1364,20 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
-  color: #6b7280;
+  font-size: var(--font-caption);
+  color: var(--text-muted);
 }
 
 .chunk-head span:first-child {
   font-weight: 700;
-  color: #1f2937;
+  color: var(--text);
 }
 
 .chunk-heading {
-  color: #1d4ed8;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
+  color: var(--text-soft);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
   padding: 1px 8px;
   max-width: 60%;
   overflow: hidden;
@@ -1378,9 +1392,9 @@ onMounted(async () => {
 
 .chunk-item pre {
   margin: 6px 0 0;
-  font-size: 11.5px;
+  font-size: var(--font-caption);
   line-height: 1.55;
-  color: #374151;
+  color: var(--text-soft);
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
@@ -1402,8 +1416,8 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 6px 8px;
 }
 
@@ -1437,9 +1451,9 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   box-shadow: 0 20px 50px rgb(0 0 0 / 25%);
   padding: 14px 16px;
 }
@@ -1453,15 +1467,15 @@ onMounted(async () => {
 
 .doc-dialog-head h3 {
   margin: 0;
-  font-size: 14px;
-  color: #1f2937;
+  font-size: var(--font-body);
+  color: var(--text);
 }
 
 .doc-dialog-meta {
   display: flex;
   gap: 10px;
-  font-size: 11.5px;
-  color: #6b7280;
+  font-size: var(--font-caption);
+  color: var(--text-muted);
 }
 
 .doc-dialog textarea {
@@ -1473,28 +1487,28 @@ onMounted(async () => {
 
 .doc-dialog textarea[readonly],
 .doc-dialog input[readonly] {
-  background: #f9fafb;
-  color: #374151;
+  background: var(--surface-2);
+  color: var(--text-soft);
   cursor: default;
 }
 
 .doc-dialog-error {
   margin: 0;
-  font-size: 12px;
-  color: #b91c1c;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
+  font-size: var(--font-caption);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-radius: var(--radius-lg);
   padding: 6px 10px;
 }
 
 .doc-dialog-missing {
   margin: 0;
-  font-size: 12px;
-  color: #92400e;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 8px;
+  font-size: var(--font-caption);
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+  border-radius: var(--radius-lg);
   padding: 6px 10px;
   line-height: 1.55;
 }
@@ -1507,22 +1521,22 @@ onMounted(async () => {
 }
 
 .knowledge-doc-title {
-  font-size: 12.5px;
+  font-size: var(--font-small);
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .knowledge-doc-meta {
-  font-size: 11.5px;
-  color: #6b7280;
+  font-size: var(--font-caption);
+  color: var(--text-muted);
 }
 
 .knowledge-hit-empty {
   border: none !important;
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-caption);
 }
 </style>
