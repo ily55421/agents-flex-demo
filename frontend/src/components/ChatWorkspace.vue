@@ -121,9 +121,9 @@ onBeforeUnmount(() => {
           </div>
         </details>
         <details v-if="run" class="chat-trace-menu">
-          <summary title="查看完整执行 Trace">
+          <summary title="查看完整执行链路">
             <IconTimeline :size="15"/>
-            Trace
+            链路
           </summary>
           <div class="chat-trace-content">
             <TraceViewer :trace="trace"/>
@@ -183,7 +183,8 @@ onBeforeUnmount(() => {
             <p v-else-if="message.content">{{ message.content }}</p>
             <div v-for="tool in message.toolCalls" :key="tool.id" class="tool-call-row">
               <IconTool :size="15"/>
-              <span>调用 {{ tool.name }}</span><code>{{ JSON.stringify(tool.arguments) }}</code>
+              <span>调用 {{ tool.name }}</span>
+              <pre class="tool-args">{{ JSON.stringify(tool.arguments, null, 2) }}</pre>
             </div>
           </div>
         </article>

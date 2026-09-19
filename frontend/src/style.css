@@ -335,7 +335,7 @@ textarea:focus, input:focus, select:focus { border-color: var(--accent); box-sha
 .chat-trace-menu > summary::-webkit-details-marker { display: none; }
 .chat-trace-menu > summary:hover, .chat-trace-menu[open] > summary { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .chat-trace-content { position: absolute; z-index: var(--z-popover); top: calc(100% + 8px); right: 0; width: min(960px, calc(100vw - 32px)); max-height: min(78vh, 760px); overflow: auto; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
-.chat-trace-content .trace-viewer { min-width: 720px; border: 0; border-radius: 0; box-shadow: none; }
+.chat-trace-content .trace-viewer { min-width: 0; border: 0; border-radius: 0; box-shadow: none; }
 .chat-timeline { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 26px clamp(16px, 4vw, 52px); }
 .chat-empty { min-height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; }
 .assistant-avatar, .message-avatar { display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--border-strong); }
@@ -369,8 +369,9 @@ textarea:focus, input:focus, select:focus { border-color: var(--accent); box-sha
 .reasoning-block { margin-bottom: 9px; padding: 7px 9px; background: var(--surface-2); color: var(--text-muted); font-size: var(--font-caption); }
 .reasoning-block summary { cursor: pointer; font-weight: 650; }
 .reasoning-block p { margin: 6px 0 0; line-height: 1.55; white-space: pre-wrap; }
-.tool-call-row { margin-top: 8px; padding: 8px 9px; display: grid; grid-template-columns: 16px auto minmax(0, 1fr); align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-soft); font-size: var(--font-caption); }
+.tool-call-row { margin-top: 8px; padding: 8px 9px; display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-soft); font-size: var(--font-caption); }
 .tool-call-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--code); font-size: var(--font-micro); }
+.tool-args { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 7px 8px; border-left: 2px solid var(--border-strong); background: var(--surface); color: var(--code); font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: var(--font-micro); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
 .thinking-message { margin-bottom: 12px; }
 .typing-dots { display: flex; gap: 4px; padding: 6px 0; }
 .typing-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); animation: typing 1.1s infinite ease-in-out; }
@@ -406,7 +407,7 @@ textarea:focus, input:focus, select:focus { border-color: var(--accent); box-sha
 .span-row[data-status="OK"] { border-left: 2px solid var(--success); }
 .child-span { margin-left: 27px; border-left: 1px solid var(--border-strong); background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
 .child-span > button { padding-left: 18px; }
-.trace-row > button { width: 100%; min-height: 48px; padding: 0 13px; display: grid; grid-template-columns: 20px minmax(170px, 1fr) minmax(100px, .7fr) 88px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--text-soft); }
+.trace-row > button { width: 100%; min-height: 48px; padding: 0 13px; display: grid; grid-template-columns: 20px minmax(0, 1fr) minmax(0, .7fr) 88px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--text-soft); }
 .trace-row > button:hover { background: var(--surface-2); }
 .trace-type { font: var(--font-caption) "SFMono-Regular", monospace; color: var(--text); }
 .trace-row code { overflow: hidden; text-overflow: ellipsis; font-size: var(--font-caption); color: var(--accent); }
@@ -422,7 +423,7 @@ textarea:focus, input:focus, select:focus { border-color: var(--accent); box-sha
 .lifecycle-trace summary { padding: 12px 14px; cursor: pointer; color: var(--text-soft); font-size: var(--font-small); font-weight: 650; }
 .lifecycle-trace summary span { margin-left: 5px; color: var(--text-muted); font: var(--font-micro) "SFMono-Regular", monospace; font-weight: 400; }
 .lifecycle-list { max-height: 190px; overflow: auto; border-top: 1px solid var(--border); }
-.lifecycle-list div { min-height: 40px; padding: 8px 14px; display: grid; grid-template-columns: minmax(170px, 1fr) minmax(100px, .7fr) 88px; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
+.lifecycle-list div { min-height: 40px; padding: 8px 14px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .7fr) 88px; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
 .lifecycle-list code { color: var(--text); font-size: var(--font-caption); }
 .lifecycle-list span { overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-size: var(--font-caption); }
 .lifecycle-list time { text-align: right; color: var(--text-muted); font: var(--font-micro) "SFMono-Regular", monospace; }

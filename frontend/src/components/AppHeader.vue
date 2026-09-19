@@ -25,13 +25,13 @@ const connectionLabel = computed(() => ({
       </div>
       <div>
         <div class="brand-name">Agents-Flex</div>
-        <div class="brand-product">Agent Runtime Showcase</div>
+        <div class="brand-product">Agent 运行时演示</div>
       </div>
     </div>
 
     <div class="header-meta">
       <div v-if="run" class="run-reference">
-        <span>RUN</span>
+        <span>运行</span>
         <code>{{ run.runId.slice(0, 8) }}</code>
       </div>
       <div class="connection-indicator" :data-state="connectionState" role="status">

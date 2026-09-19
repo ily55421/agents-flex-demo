@@ -39,7 +39,7 @@ const isTerminal = computed(() => ['COMPLETED', 'FAILED', 'CANCELLED', 'MAX_ITER
   <section class="surface run-controls" aria-labelledby="controls-heading">
     <div class="section-heading compact-heading">
       <h2 id="controls-heading">运行控制</h2>
-      <span class="native-label">NEXT SAFE CHECKPOINT</span>
+      <span class="native-label">下一个安全检查点</span>
     </div>
     <div class="control-grid">
       <button class="primary-button" type="button" :disabled="busy || !canStart" @click="emit('start')">

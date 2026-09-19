@@ -28,7 +28,7 @@ const lastError = computed(() => {
   <section class="surface retry-panel" aria-labelledby="retry-heading">
     <div class="section-heading compact-heading">
       <IconRefreshDot :size="18" :stroke-width="1.9"/>
-      <h2 id="retry-heading">Persistent Retry</h2>
+      <h2 id="retry-heading">持久重试</h2>
       <span class="native-label">{{ retryCount }} / {{ maxRetries }}</span>
     </div>
     <div class="retry-policy">
@@ -40,11 +40,11 @@ const lastError = computed(() => {
       <div v-for="item in attempts" :key="item.attempt" :class="item.ok ? 'ok' : 'failed'">
         <IconCircleCheck v-if="item.ok" :size="17" :stroke-width="2"/>
         <IconCircleX v-else :size="17" :stroke-width="2"/>
-        <span>Attempt {{ item.attempt }}</span>
+        <span>第 {{ item.attempt }} 次</span>
         <small>{{ item.message }}</small>
       </div>
     </div>
     <div v-else class="metric-empty">工具执行后将在这里显示持久化重试</div>
-    <p v-if="lastError" class="retry-last-error"><span>Last Error</span>{{ lastError }}</p>
+    <p v-if="lastError" class="retry-last-error"><span>最近错误</span>{{ lastError }}</p>
   </section>
 </template>

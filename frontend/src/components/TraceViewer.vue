@@ -6,6 +6,7 @@ import {
   IconGitBranch,
   IconTimeline,
 } from '@tabler/icons-vue'
+import {eventLabel} from '@/utils/eventLabels'
 import type {AgentEvent, TraceSpan, TraceView} from '@/types/agent'
 
 const props = defineProps<{ trace: TraceView | null }>()
@@ -81,7 +82,7 @@ function spanMeta(span: TraceSpan) {
  * @param type AgentEventType 名称
  */
 function title(type: string) {
-  return type.replaceAll('_', ' ')
+  return eventLabel(type)
 }
 
 /**
@@ -99,12 +100,12 @@ function elapsed(event: AgentEvent) {
     <div class="trace-header">
       <div class="section-heading compact-heading">
         <IconTimeline :size="19" :stroke-width="1.8"/>
-        <h2 id="trace-heading">Execution Trace</h2>
+        <h2 id="trace-heading">执行链路</h2>
       </div>
       <div class="trace-meta">
         <div v-if="trace" class="trace-stats">
-          <span><b>{{ trace.totalTokens.toLocaleString() }}</b> tokens</span>
-          <span><b>{{ duration(trace.durationMs) }}</b> wall clock</span>
+          <span><b>{{ trace.totalTokens.toLocaleString() }}</b> token</span>
+          <span><b>{{ duration(trace.durationMs) }}</b> 总耗时</span>
         </div>
         <div class="projection-label">
           <IconGitBranch :size="14"/>
@@ -113,15 +114,15 @@ function elapsed(event: AgentEvent) {
       </div>
     </div>
 
-    <div v-if="trace" class="otel-metrics" aria-label="OpenTelemetry metrics">
-      <div><span>MODEL REQUESTS</span><b>{{ modelRequests }}</b></div>
-      <div><span>TOOL CALLS</span><b>{{ toolCalls }}</b></div>
-      <div><span>TOOL ERRORS</span><b>{{ toolErrors }}</b></div>
-      <div><span>EXPORTED SPANS</span><b>{{ spans.length }}</b></div>
+    <div v-if="trace" class="otel-metrics" aria-label="OpenTelemetry 指标">
+      <div><span>模型请求</span><b>{{ modelRequests }}</b></div>
+      <div><span>工具调用</span><b>{{ toolCalls }}</b></div>
+      <div><span>工具错误</span><b>{{ toolErrors }}</b></div>
+      <div><span>已导出片段</span><b>{{ spans.length }}</b></div>
     </div>
 
     <div class="trace-list span-tree">
-      <div v-if="!roots.length" class="trace-empty">等待 Agents-Flex 导出第一个 OpenTelemetry Span</div>
+      <div v-if="!roots.length" class="trace-empty">等待 Agents-Flex 导出第一个链路片段</div>
       <template v-for="root in roots" :key="root.spanId">
         <article class="trace-row span-row" :data-status="root.status">
           <button type="button" :aria-expanded="expanded.has(root.spanId)" @click="toggle(root.spanId)">
@@ -134,35 +135,35 @@ function elapsed(event: AgentEvent) {
           <div v-if="expanded.has(root.spanId)" class="trace-detail">
             <dl>
               <div>
-                <dt>Trace ID</dt>
+                <dt>链路 ID</dt>
                 <dd>{{ root.traceId }}</dd>
               </div>
               <div>
-                <dt>Span ID</dt>
+                <dt>片段 ID</dt>
                 <dd>{{ root.spanId }}</dd>
               </div>
               <div>
-                <dt>Parent</dt>
-                <dd>{{ root.parentSpanId || 'ROOT' }}</dd>
+                <dt>父片段</dt>
+                <dd>{{ root.parentSpanId || '根节点' }}</dd>
               </div>
               <div>
-                <dt>Status</dt>
+                <dt>状态</dt>
                 <dd>{{ root.status }}</dd>
               </div>
               <div v-if="root.model">
-                <dt>Model</dt>
+                <dt>模型</dt>
                 <dd>{{ root.model }}</dd>
               </div>
               <div v-if="root.inputTokens !== undefined">
-                <dt>Tokens</dt>
-                <dd>{{ root.inputTokens }} in / {{ root.outputTokens ?? 0 }} out</dd>
+                <dt>Token 数</dt>
+                <dd>输入 {{ root.inputTokens }} / 输出 {{ root.outputTokens ?? 0 }}</dd>
               </div>
               <div v-if="root.arguments">
-                <dt>Arguments</dt>
+                <dt>入参</dt>
                 <dd>{{ root.arguments }}</dd>
               </div>
               <div v-if="root.result">
-                <dt>Result</dt>
+                <dt>结果</dt>
                 <dd>{{ root.result }}</dd>
               </div>
             </dl>
@@ -181,39 +182,39 @@ function elapsed(event: AgentEvent) {
           <div v-if="expanded.has(child.spanId)" class="trace-detail">
             <dl>
               <div>
-                <dt>Trace ID</dt>
+                <dt>链路 ID</dt>
                 <dd>{{ child.traceId }}</dd>
               </div>
               <div>
-                <dt>Span ID</dt>
+                <dt>片段 ID</dt>
                 <dd>{{ child.spanId }}</dd>
               </div>
               <div>
-                <dt>Parent</dt>
+                <dt>父片段</dt>
                 <dd>{{ child.parentSpanId }}</dd>
               </div>
               <div>
-                <dt>Status</dt>
+                <dt>状态</dt>
                 <dd>{{ child.status }}</dd>
               </div>
               <div v-if="child.model">
-                <dt>Model</dt>
+                <dt>模型</dt>
                 <dd>{{ child.model }}</dd>
               </div>
               <div v-if="child.inputTokens !== undefined">
-                <dt>Tokens</dt>
-                <dd>{{ child.inputTokens }} in / {{ child.outputTokens ?? 0 }} out</dd>
+                <dt>Token 数</dt>
+                <dd>输入 {{ child.inputTokens }} / 输出 {{ child.outputTokens ?? 0 }}</dd>
               </div>
               <div v-if="child.arguments">
-                <dt>Arguments</dt>
+                <dt>入参</dt>
                 <dd>{{ child.arguments }}</dd>
               </div>
               <div v-if="child.result">
-                <dt>Result</dt>
+                <dt>结果</dt>
                 <dd>{{ child.result }}</dd>
               </div>
               <div v-if="child.output">
-                <dt>Output</dt>
+                <dt>输出</dt>
                 <dd>{{ child.output }}</dd>
               </div>
             </dl>
@@ -224,11 +225,11 @@ function elapsed(event: AgentEvent) {
     </div>
 
     <details class="lifecycle-trace">
-      <summary>Lifecycle events <span>{{ lifecycleEvents.length }} · AGENTS_FLEX_NATIVE</span></summary>
+      <summary>生命周期事件 <span>{{ lifecycleEvents.length }} · Agents-Flex 原生</span></summary>
       <div class="lifecycle-list">
         <div v-for="event in lifecycleEvents" :key="event.eventId">
           <code>{{ title(event.type) }}</code>
-          <span>{{ event.data.toolName ?? event.data.phase ?? 'RUNTIME' }}</span>
+          <span>{{ event.data.toolName ?? event.data.phase ?? '运行时' }}</span>
           <time>+{{ elapsed(event) }} ms</time>
         </div>
       </div>

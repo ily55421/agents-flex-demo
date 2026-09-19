@@ -26,8 +26,8 @@ function duration(value: number) {
   <section class="surface metric-panel" aria-labelledby="budget-heading">
     <div class="section-heading compact-heading">
       <IconBolt :size="18" :stroke-width="1.9"/>
-      <h2 id="budget-heading">Budget Control</h2>
-      <span class="native-label">NATIVE</span>
+      <h2 id="budget-heading">预算控制</h2>
+      <span class="native-label">原生</span>
     </div>
     <div class="budget-main">
       <div>
@@ -50,7 +50,7 @@ function duration(value: number) {
         }}</strong><small>{{ toolPercent }}%</small></div>
       <div>
         <IconCurrencyDollar :size="16"/>
-        <span>估算成本</span><strong>${{ budget.estimatedCost.toFixed(4) }}</strong><small>Demo Projection</small></div>
+        <span>估算成本</span><strong>${{ budget.estimatedCost.toFixed(4) }}</strong><small>演示估算</small></div>
     </div>
     <div class="budget-duration">
       <IconClockHour4 :size="15"/>

@@ -12,15 +12,15 @@ const reason = ref('该报告仍需内部复核')
   <section class="interaction-panel approval-panel" aria-labelledby="approval-heading">
     <div class="interaction-icon approval-icon"><IconShieldExclamation :size="23" :stroke-width="1.8" /></div>
     <div class="interaction-content">
-      <div class="interaction-kicker">HUMAN APPROVAL REQUIRED</div>
+      <div class="interaction-kicker">需要人工审批</div>
       <h2 id="approval-heading">{{ suspension.message }}</h2>
       <p>{{ suspension.metadata.approvalReason }}</p>
 
       <dl class="approval-details">
-        <div><dt>Action</dt><dd>{{ suspension.metadata.toolName }}</dd></div>
-        <div><dt>Risk</dt><dd>{{ suspension.metadata.riskLevel }}</dd></div>
-        <div><dt>Policy</dt><dd>{{ suspension.metadata.approvalCode }}</dd></div>
-        <div><dt>Arguments</dt><dd><code>{{ JSON.stringify(toolCall?.arguments ?? {}) }}</code></dd></div>
+        <div><dt>操作</dt><dd>{{ suspension.metadata.toolName }}</dd></div>
+        <div><dt>风险</dt><dd>{{ suspension.metadata.riskLevel }}</dd></div>
+        <div><dt>审批策略</dt><dd>{{ suspension.metadata.approvalCode }}</dd></div>
+        <div><dt>入参</dt><dd><code>{{ JSON.stringify(toolCall?.arguments ?? {}) }}</code></dd></div>
       </dl>
 
       <div class="approval-reason field-block">

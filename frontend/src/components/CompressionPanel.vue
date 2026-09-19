@@ -38,7 +38,7 @@ function clock(value: number) {
   <section class="surface metric-panel" aria-labelledby="compression-heading">
     <div class="section-heading compact-heading">
       <IconArrowsMinimize :size="18" :stroke-width="1.9"/>
-      <h2 id="compression-heading">Message Compression</h2>
+      <h2 id="compression-heading">消息压缩</h2>
       <span class="native-label">{{ statusLabel }}</span>
     </div>
     <div class="compression-lifecycle" :data-status="compression.status">
@@ -47,12 +47,12 @@ function clock(value: number) {
       <time>{{ clock(compression.startedAt) }} → {{ clock(compression.completedAt) }}</time>
     </div>
     <div class="compression-flow">
-      <div><span>Before</span><strong>{{ compression.beforeMessages }}</strong><small>{{ compression.beforeTokens }}
-        estimated tokens</small></div>
+      <div><span>压缩前</span><strong>{{ compression.beforeMessages }}</strong><small>{{ compression.beforeTokens }}
+        估算 token</small></div>
       <IconChevronRight :size="20" :stroke-width="1.6" aria-hidden="true"/>
-      <div><span>Model Context</span><strong>{{ compression.afterMessages }}</strong><small>{{
+      <div><span>压缩后</span><strong>{{ compression.afterMessages }}</strong><small>{{
           compression.afterTokens
-        }} estimated tokens</small></div>
+        }} 估算 token</small></div>
     </div>
     <div class="summary-block">
       <span>Agents-Flex 语义摘要</span>

@@ -2,6 +2,7 @@
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {IconActivity, IconChevronDown, IconChevronRight, IconFilter, IconPlayerPlay} from '@tabler/icons-vue'
 import type {AgentEvent} from '@/types/agent'
+import {eventLabel} from '@/utils/eventLabels'
 
 const props = defineProps<{ events: AgentEvent[] }>()
 const streamElement = ref<HTMLElement | null>(null)
@@ -103,14 +104,6 @@ function selectFilter(value: 'all' | 'model' | 'tool' | 'control') {
 }
 
 /**
- * 将大写下划线事件类型转换为便于阅读的标题格式。
- * @param type 原生 AgentEventType 名称
- */
-function label(type: string) {
-  return type.split('_').map((word) => word[0] + word.slice(1).toLowerCase()).join(' ')
-}
-
-/**
  * 根据事件语义选择成功、警告、失败、重试或中性色。
  * @param type 原生 AgentEventType 名称
  */
@@ -138,7 +131,7 @@ function preview(event: AgentEvent) {
   if (event.data.toolName) return String(event.data.toolName)
   if (event.data.message) return String(event.data.message)
   if (event.data.content) return String(event.data.content)
-  return `phase=${String(event.data.phase ?? 'n/a')}`
+  return `阶段：${String(event.data.phase ?? '无')}`
 }
 </script>
 
@@ -147,7 +140,7 @@ function preview(event: AgentEvent) {
     <div class="event-stream-header">
       <div class="section-heading compact-heading">
         <IconActivity :size="18" :stroke-width="1.9"/>
-        <h2 id="events-heading">Agent Event Stream</h2>
+        <h2 id="events-heading">Agent 事件流</h2>
       </div>
       <div class="event-count">
         <IconPlayerPlay :size="13" fill="currentColor"/>
@@ -169,10 +162,10 @@ function preview(event: AgentEvent) {
         <div class="event-sequence">{{ String(event.sequence).padStart(2, '0') }}</div>
         <div class="event-body">
           <button class="event-summary" type="button" :aria-expanded="expandedId === event.eventId"
-                  :aria-label="`${label(event.type)} 事件详情`" @click="toggle(event.eventId)">
+                  :aria-label="`${eventLabel(event.type)} 事件详情`" @click="toggle(event.eventId)">
             <IconChevronDown v-if="expandedId === event.eventId" :size="13"/>
             <IconChevronRight v-else :size="13"/>
-            <span><strong>{{ label(event.type) }}</strong><small>{{ preview(event) }}</small></span>
+            <span><strong>{{ eventLabel(event.type) }}</strong><small>{{ preview(event) }}</small></span>
             <time>{{ new Date(event.occurredAt).toLocaleTimeString('zh-CN', {hour12: false}) }}</time>
           </button>
         </div>
@@ -182,9 +175,9 @@ function preview(event: AgentEvent) {
     <div v-if="selectedEvent" class="event-detail event-inspector">
       <dl>
         <div><dt>Agent</dt><dd>{{ selectedEvent.agentId }}@{{ selectedEvent.agentVersion }}</dd></div>
-        <div><dt>Run</dt><dd>{{ selectedEvent.runId }}</dd></div>
-        <div><dt>Event</dt><dd>{{ selectedEvent.eventId }}</dd></div>
-        <div><dt>Source</dt><dd>{{ selectedEvent.source }}</dd></div>
+        <div><dt>运行</dt><dd>{{ selectedEvent.runId }}</dd></div>
+        <div><dt>事件</dt><dd>{{ selectedEvent.eventId }}</dd></div>
+        <div><dt>来源</dt><dd>{{ selectedEvent.source }}</dd></div>
       </dl>
       <pre>{{ JSON.stringify(selectedEvent.data, null, 2) }}</pre>
     </div>

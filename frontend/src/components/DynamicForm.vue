@@ -31,7 +31,7 @@ watch(
       <IconForms :size="22" :stroke-width="1.8"/>
     </div>
     <div class="interaction-content">
-      <div class="interaction-kicker">AGENTS-FLEX FORM INPUT</div>
+      <div class="interaction-kicker">Agents-Flex 表单输入</div>
       <h2 id="form-heading">{{ schema.title }}</h2>
       <p v-if="schema.description">{{ schema.description }}</p>
 

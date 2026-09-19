@@ -296,7 +296,7 @@ function close() {
             </label>
             <div v-if="draftModel.modelThinkingEnabled" class="field-block field-span">
               <ConfigFieldLabel for-id="dl-thinking-protocol" text="思考协议" help="供应商思考协议名称，通常保持服务端默认。"/>
-              <input id="dl-thinking-protocol" v-model.trim="draftModel.modelThinkingProtocol" maxlength="80" placeholder="none"/>
+              <input id="dl-thinking-protocol" v-model.trim="draftModel.modelThinkingProtocol" maxlength="80" placeholder="留空使用服务端默认"/>
             </div>
             <div class="field-block">
               <ConfigFieldLabel for-id="dl-seed" text="随机种子" help="供应商支持时可提高可复现性；留空不发送。"/>
@@ -335,10 +335,10 @@ function close() {
               <input id="dl-retry-delay" v-model.number="draftModel.modelRetryInitialDelayMillis" type="number" min="0" max="300000" step="1"/>
             </div>
             <div class="field-block">
-              <ConfigFieldLabel for-id="dl-response-format" text="响应格式" help="NONE 或 JSON_OBJECT。"/>
+              <ConfigFieldLabel for-id="dl-response-format" text="响应格式" help="模型默认表示不指定；JSON 对象表示强制模型返回可解析的 JSON。"/>
               <select id="dl-response-format" v-model="draftModel.modelResponseFormat">
                 <option value="NONE">模型默认</option>
-                <option value="JSON_OBJECT">JSON Object</option>
+                <option value="JSON_OBJECT">JSON 对象</option>
               </select>
             </div>
             <div class="field-block field-span section-divider">
