@@ -32,3 +32,28 @@ knowledge-vector-sync-*.tar.gz
 
 # 构建调试产物：javac classpath 转储
 cp11.txt
+
+# 总结文档：博客内容（672 篇 Markdown，约 15MB）随仓库一起维护，
+# 但同一目录下的 Python 打包工程、Android 工具链与运行数据体量达数 GB，
+# 必须排除——否则 clone 体积会从十几 MB 涨到 4GB 以上。
+# 说明：web-app/ 是已被主服务取代的原 Python 服务，仅保留其源码与静态资源作为
+# 迁移参照；docs/ 与根目录的 *.md 才是 BlogStore 实际导入的内容。
+总结文档.zip
+总结文档/web-app/data/
+总结文档/web-app/dist/
+总结文档/web-app/build/
+总结文档/web-app/__pycache__/
+总结文档/**/__pycache__/
+# Android 打包工程：保留 gradle 脚本与源码，排除工具链、构建输出与 APK
+总结文档/web-app/android/build-tools/
+总结文档/web-app/android/.gradle/
+总结文档/web-app/android/app/build/
+总结文档/web-app/android/*.apk
+总结文档/web-app/android/*.APK
+# 独立克隆的知识库博客仓库（含自己的 .git，嵌套仓库不应作为 gitlink 提交）
+总结文档/knowledge-base-blog/
+# 编辑器与本地工具状态
+总结文档/.claude/
+总结文档/.trae/
+总结文档/.trae-memory/
+总结文档/.understand-anything/

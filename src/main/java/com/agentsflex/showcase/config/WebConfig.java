@@ -39,14 +39,17 @@ public class WebConfig implements WebMvcConfigurer {
 
     /**
      * 注册 /api 下的 CORS 规则，仅开放 Demo 使用的 GET、POST、PUT、DELETE 和预检请求。
-     * 端口覆盖 Vite 默认的 5173 及其被占用时自动递增的 5174/5175。
+     * 端口覆盖 Vite 默认端口（当前 15173，历史 5173）及其被占用时自动递增的相邻端口。
      *
      * @param registry Spring MVC 的全局跨域规则注册器
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
-                .allowedOrigins("http://localhost:5173", "http://127.0.0.1:5173",
+                .allowedOrigins("http://localhost:15173", "http://127.0.0.1:15173",
+                        "http://localhost:15174", "http://127.0.0.1:15174",
+                        "http://localhost:15175", "http://127.0.0.1:15175",
+                        "http://localhost:5173", "http://127.0.0.1:5173",
                         "http://localhost:5174", "http://127.0.0.1:5174",
                         "http://localhost:5175", "http://127.0.0.1:5175")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")

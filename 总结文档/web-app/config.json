@@ -1,0 +1,12 @@
+{
+  "port": 8080,
+  "db_path": "data/docs.db",
+  "docs_src": "../",
+  "page_limit": 20,
+  "theme_default": "dark",
+  "enable_suggest": true,
+  "enable_highlight": true,
+  "log_level": "INFO",
+  "hot_reload": false,
+  "watch_paths": ["server.py"]
+}

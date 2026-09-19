@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import {computed, onMounted, ref} from 'vue'
 import {storeToRefs} from 'pinia'
-import {IconAdjustmentsHorizontal, IconDatabase, IconMessages, IconRefresh, IconRobot, IconSitemap} from '@tabler/icons-vue'
+import {IconAdjustmentsHorizontal, IconBook, IconDatabase, IconMessages, IconRefresh, IconRobot, IconSitemap} from '@tabler/icons-vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AgentPicker from '@/components/AgentPicker.vue'
 import AgentWorkshop from '@/components/AgentWorkshop.vue'
 import ApprovalPanel from '@/components/ApprovalPanel.vue'
+import BlogPanel from '@/components/blog/BlogPanel.vue'
 import BudgetPanel from '@/components/BudgetPanel.vue'
 import CapabilityMap from '@/components/CapabilityMap.vue'
 import ChatWorkspace from '@/components/ChatWorkspace.vue'
@@ -31,14 +32,14 @@ const {run, agent, trace, modelStatus, streamingText, streamingReasoning, busy, 
 const knowledgePanel = ref<{ reload: () => Promise<void> } | null>(null)
 
 /**
- * 顶部页面 Tab：Agent 对话（默认）/ Agent 维护 / 模型配置 / 知识库 / 图谱。
+ * 顶部页面 Tab：Agent 对话（默认）/ Agent 维护 / 模型配置 / 知识库 / 图谱 / 文档博客。
  * 旧链接的 ?view=chat（纯对话）已并入对话页，回退到默认页。
  */
-type PageTab = 'workspace' | 'agents' | 'models' | 'knowledge' | 'graph'
+type PageTab = 'workspace' | 'agents' | 'models' | 'knowledge' | 'graph' | 'blog'
 const activeTab = ref<PageTab>(
     (() => {
       const view = new URL(window.location.href).searchParams.get('view')
-      return view === 'agents' || view === 'models' || view === 'knowledge' || view === 'graph' ? view : 'workspace'
+      return view === 'agents' || view === 'models' || view === 'knowledge' || view === 'graph' || view === 'blog' ? view : 'workspace'
     })(),
 )
 
@@ -158,6 +159,9 @@ onMounted(() => {
       <button type="button" :class="{active: activeTab === 'graph'}" aria-label="图谱" title="图谱" @click="switchTab('graph')">
         <IconSitemap :size="16"/><span class="tab-label">图谱</span>
       </button>
+      <button type="button" :class="{active: activeTab === 'blog'}" aria-label="文档博客" title="文档博客" @click="switchTab('blog')">
+        <IconBook :size="16"/><span class="tab-label">文档博客</span>
+      </button>
     </nav>
 
     <!-- Agent 对话页：左侧会话历史 + Agent 选择，中间对话区，右侧事件流。 -->
@@ -220,6 +224,11 @@ onMounted(() => {
 
     <main v-else-if="activeTab === 'graph'" id="main-content" class="graph-tab-shell" tabindex="-1">
       <GraphExplorer/>
+    </main>
+
+    <!-- 文档博客页：原独立 Python 服务（总结文档）并入主服务后的浏览界面。 -->
+    <main v-else-if="activeTab === 'blog'" id="main-content" class="blog-tab-shell" tabindex="-1">
+      <BlogPanel/>
     </main>
 
     <main v-else id="main-content" class="knowledge-shell" tabindex="-1">

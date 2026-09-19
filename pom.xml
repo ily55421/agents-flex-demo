@@ -79,6 +79,14 @@
             <artifactId>duckdb_jdbc</artifactId>
             <version>1.5.5.1</version>
         </dependency>
+        <!-- SQLite JDBC：文档博客复用 SQLite 的 FTS5 trigram 全文检索（中文子串匹配），
+             与 DuckDB（Run 归档）职责分离；纯本地文件访问，无独立服务进程。
+             版本与部署机缓存一致，避免额外下载。 -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.42.0.1</version>
+        </dependency>
         <!-- RogueMemory 嵌入式 AI 记忆层：HNSW 向量 + BM25 混合检索，mmap 持久化，零第三方依赖 -->
         <!-- 1.1.7-patch2：本项目子模块 RogueMemory/（源码仓库 bryan31/RogueMap 补丁分支）本地构建，
              修复 Windows 上恢复扫描索引 blob、并发读写 mmap 导致的 JVM 原生崩溃，务必使用本地构建版本 -->

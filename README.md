@@ -94,7 +94,10 @@ pnpm install
 pnpm dev
 ```
 
-打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。Vite 会把 `/api` 代理到 `http://localhost:8080`。
+打开 [http://127.0.0.1:15173](http://127.0.0.1:15173)。Vite 会把 `/api` 代理到 `http://localhost:18080`。
+
+> 默认端口：后端 `18080`（`SERVER_PORT` 可覆盖），前端 `15173`（`FRONTEND_PORT` 可覆盖，代理目标由 `BACKEND_PORT` 决定）。
+> 默认值刻意避开 8080/5173，这两个端口在开发机上常被其他项目占用。也可直接运行 `.\start-all.ps1` 一键启动（Windows）或 `./start-all.sh`（Linux/macOS）。
 
 ## 演示流程
 

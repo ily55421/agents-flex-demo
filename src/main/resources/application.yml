@@ -1,5 +1,6 @@
 server:
-  port: 8080
+  # 默认端口避开被其他项目占用的 8080；可用环境变量 SERVER_PORT 覆盖
+  port: ${SERVER_PORT:18080}
   error:
     include-message: always
 
@@ -67,6 +68,13 @@ agents-flex:
     store-path: ${NEO4J_STORE_PATH:./data/neo4j}
     # 页面缓存容量（k/m/g 后缀）；留空使用 Neo4j 默认值
     page-cache-size: ${NEO4J_PAGE_CACHE:}
+  # 文档博客（原「总结文档」Python 服务）：复用 SQLite 的 FTS5 trigram 全文检索。
+  # db-path 默认落在 ./data/blog/（data/ 已被 gitignore），首次启动按 docs-src 全量导入。
+  blog:
+    db-path: ${BLOG_DB_PATH:./data/blog/docs.db}
+    docs-src: ${BLOG_DOCS_SRC:./总结文档}
+    page-limit: ${BLOG_PAGE_LIMIT:20}
+    import-on-startup: ${BLOG_IMPORT_ON_STARTUP:true}
 
 logging:
   level:

@@ -1,0 +1,40 @@
+﻿Android APK Build Record - 2026-06-25 03:02:02
+=====================================================
+BUILD STATUS: SUCCESS
+
+APK Location: d:\阅读\总结文档\web-app\android\app-debug.apk
+APK Size: 93.32 MB
+APK Type: Debug (arm64-v8a, x86_64)
+
+Key Technical Details:
+- Framework: Chaquopy 15.0.1 (Python on Android)
+- Android Gradle Plugin: 8.1.0
+- Kotlin Plugin: 1.9.0
+- Gradle: 8.4 (via Tencent Cloud mirror)
+- Python (on device): 3.8
+- Build Python: System Python 3.14 (pyc warning only, no pip used)
+- JDK: 17 (Eclipse Temurin, embedded in build-tools)
+- Android SDK: 34 (commandline-tools, embedded in build-tools)
+- minSdk: 24, targetSdk: 34
+- ABI filters: arm64-v8a, x86_64
+
+Problems Encountered and Solutions:
+1. Chinese path encoding issues: Solved by using 'subst X:' to map project directory to a drive letter
+2. Python cgi module missing (Python 3.14): Removed pip block from build.gradle, manually downloaded markdown/Pygments wheels and extracted to app/src/main/python
+3. Kotlin daemon sandbox restriction: Set kotlin.compiler.execution.strategy=in-process in gradle.properties
+4. Kotlin compiler tmpdir issue: Used GRADLE_OPTS to set java.io.tmpdir to system TEMP directory
+5. Gradle daemon log path: Set GRADLE_USER_HOME to project-local build-tools/gradle-home
+
+Build Method (for future builds):
+1. subst X: "d:\阅读\总结文档\web-app\android"
+2. Set JAVA_HOME, ANDROID_SDK_ROOT, GRADLE_USER_HOME to X:\build-tools subdirs
+3. Set GRADLE_OPTS=-Djava.io.tmpdir=%TEMP% -Dfile.encoding=UTF-8
+4. Clear PYTHONHOME/PYTHONPATH, set PATH with python-3.11 first
+5. cd /d X:\ && gradlew.bat clean assembleDebug --no-daemon
+6. subst X: /d
+
+Components Included:
+- SQLite database (docs.db.zip) with initial data in assets/data/
+- Web frontend (HTML/CSS/JS) in assets/static/ with mobile adaptation
+- Python backend (server_android.py) with markdown and Pygments packages
+- WebView-based Android UI in MainActivity.kt

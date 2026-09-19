@@ -1,0 +1,116 @@
+/**
+ * prism.js tomorrow night eighties for JavaScript, CoffeeScript, CSS and HTML
+ * Based on https://github.com/chriskempson/tomorrow-theme
+ * @author Rose Pritchard
+ *
+ * 来源：node_modules/prismjs/themes/prism-tomorrow.css（v1.30.0）原样复制后做两处适配：
+ * 1. 全部选择器加 `.blog-article-body` 前缀——原文件的 `pre[class*="language-"]` 是全局选择器，
+ *    会连带改写 MarkdownView 等既有组件的代码块底色与内边距；
+ * 2. 删除块级布局规则（background / padding / margin），代码块外观统一由 BlogArticle 的
+ *    scoped 样式用主题令牌决定，这里只负责 token 配色。
+ */
+
+.blog-article-body code[class*="language-"],
+.blog-article-body pre[class*="language-"] {
+	color: #ccc;
+	background: none;
+	font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+	font-size: 1em;
+	text-align: left;
+	white-space: pre;
+	word-spacing: normal;
+	word-break: normal;
+	word-wrap: normal;
+	line-height: 1.5;
+
+	-moz-tab-size: 4;
+	-o-tab-size: 4;
+	tab-size: 4;
+
+	-webkit-hyphens: none;
+	-moz-hyphens: none;
+	-ms-hyphens: none;
+	hyphens: none;
+}
+
+/* Inline code */
+.blog-article-body :not(pre) > code[class*="language-"] {
+	padding: .1em;
+	border-radius: .3em;
+	white-space: normal;
+}
+
+.blog-article-body .token.comment,
+.blog-article-body .token.block-comment,
+.blog-article-body .token.prolog,
+.blog-article-body .token.doctype,
+.blog-article-body .token.cdata {
+	color: #999;
+}
+
+.blog-article-body .token.punctuation {
+	color: #ccc;
+}
+
+.blog-article-body .token.tag,
+.blog-article-body .token.attr-name,
+.blog-article-body .token.namespace,
+.blog-article-body .token.deleted {
+	color: #e2777a;
+}
+
+.blog-article-body .token.function-name {
+	color: #6196cc;
+}
+
+.blog-article-body .token.boolean,
+.blog-article-body .token.number,
+.blog-article-body .token.function {
+	color: #f08d49;
+}
+
+.blog-article-body .token.property,
+.blog-article-body .token.class-name,
+.blog-article-body .token.constant,
+.blog-article-body .token.symbol {
+	color: #f8c555;
+}
+
+.blog-article-body .token.selector,
+.blog-article-body .token.important,
+.blog-article-body .token.atrule,
+.blog-article-body .token.keyword,
+.blog-article-body .token.builtin {
+	color: #cc99cd;
+}
+
+.blog-article-body .token.string,
+.blog-article-body .token.char,
+.blog-article-body .token.attr-value,
+.blog-article-body .token.regex,
+.blog-article-body .token.variable {
+	color: #7ec699;
+}
+
+.blog-article-body .token.operator,
+.blog-article-body .token.entity,
+.blog-article-body .token.url {
+	color: #67cdcc;
+}
+
+.blog-article-body .token.important,
+.blog-article-body .token.bold {
+	font-weight: bold;
+}
+
+.blog-article-body .token.italic {
+	font-style: italic;
+}
+
+.blog-article-body .token.entity {
+	cursor: help;
+}
+
+.blog-article-body .token.inserted {
+	color: green;
+}

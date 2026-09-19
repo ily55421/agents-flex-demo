@@ -8,7 +8,7 @@
 #
 # 可用环境变量覆盖默认值：
 #   JAR_FILE      jar 路径（默认取部署目录里最新的 *.jar）
-#   SERVER_PORT   服务端口（默认 8080，需与 application.yml/环境一致）
+#   SERVER_PORT   服务端口（默认 18080，需与 application.yml/环境一致）
 #   JAVA_BIN      java 可执行文件（版本必须 ≥21；不设则自动识别，见下）
 #   JAVA_OPTS     JVM 参数（默认 "-Xms512m -Xmx2g"）
 #
@@ -24,7 +24,7 @@ fi
 set -u
 cd "$(dirname "$0")"
 
-SERVER_PORT="${SERVER_PORT:-8080}"
+SERVER_PORT="${SERVER_PORT:-18080}"
 JAVA_OPTS="${JAVA_OPTS:--Xms512m -Xmx2g}"
 LOG_DIR="logs"
 PID_FILE="$LOG_DIR/backend.pid"

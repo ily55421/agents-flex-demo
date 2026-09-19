@@ -129,7 +129,7 @@ onMounted(() => {
 
 .workshop-columns {
   display: grid;
-  grid-template-columns: minmax(420px, 560px) 1fr;
+  grid-template-columns: minmax(420px, 560px) minmax(0, 1fr);
   gap: 12px;
   flex: 1;
   min-height: 0;
