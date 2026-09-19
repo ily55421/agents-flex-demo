@@ -110,6 +110,47 @@ final class RunViewMapper {
     }
 
     /**
+     * 为重启后的归档 Run 构造只读 Trace 视图。
+     *
+     * <p>OTel Span 与 Metric 只存在于创建它们的进程内，归档后无法重建；Run 快照里仍保存着事件
+     * 时间线与预算计数。这里返回与 {@link #trace(DemoRun, AgentTurn)} 同构的视图，
+     * {@code spans}/{@code metrics} 置空并带 {@code archived=true}，供前端区分只读归档。</p>
+     *
+     * @param snapshot DuckDB 归档的 Run 快照视图
+     * @return Trace 面板可直接消费的归档视图
+     */
+    static Map<String, Object> archivedTrace(Map<String, Object> snapshot) {
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("runId", snapshot.get("runId"));
+        trace.put("agentId", snapshot.get("agentId"));
+        trace.put("agentVersion", snapshot.get("agentVersion"));
+        trace.put("status", snapshot.get("status"));
+        trace.put("durationMs", budgetNumber(snapshot, "usedDurationMs"));
+        trace.put("inputTokens", budgetNumber(snapshot, "inputTokens"));
+        trace.put("outputTokens", budgetNumber(snapshot, "outputTokens"));
+        trace.put("totalTokens", budgetNumber(snapshot, "usedTokens"));
+        trace.put("spans", new ArrayList<>());
+        trace.put("metrics", new ArrayList<>());
+        Object events = snapshot.get("events");
+        trace.put("events", events instanceof List<?> values ? new ArrayList<>(values) : new ArrayList<>());
+        trace.put("source", "AGENTS_FLEX_OPENTELEMETRY");
+        trace.put("archived", true);
+        return trace;
+    }
+
+    /**
+     * 读取快照 budget 中的数值字段，缺失或非数值时返回 0，避免前端数值运算遇到 null。
+     *
+     * @param snapshot Run 快照视图
+     * @param field    budget 内的目标数值字段
+     * @return 字段数值；缺失时为 0
+     */
+    private static long budgetNumber(Map<String, Object> snapshot, String field) {
+        return snapshot.get("budget") instanceof Map<?, ?> budget && budget.get(field) instanceof Number number
+                ? number.longValue() : 0L;
+    }
+
+    /**
      * 投影 Token、工具和墙钟时长预算，并计算仅用于 Demo 的成本估算。
      *
      * @param run  保存用户设置的预算上限

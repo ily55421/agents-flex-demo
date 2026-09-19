@@ -31,7 +31,7 @@ export const useAgentRun = defineStore('agent-run', () => {
     const streamingReasoning = ref('')
     const busy = ref(false)
     const error = ref<string | null>(null)
-    const connectionState = ref<'idle' | 'connecting' | 'live' | 'reconnecting'>('idle')
+    const connectionState = ref<'idle' | 'connecting' | 'live' | 'reconnecting' | 'archived'>('idle')
     let eventSource: EventSource | null = null
     let refreshTimer: number | null = null
     let streamFlushTimer: number | null = null
@@ -302,7 +302,14 @@ export const useAgentRun = defineStore('agent-run', () => {
             agent.value = nextRun.agent
             installTrace(nextTrace)
             setLocationRun(runId)
-            connect(runId)
+            // 归档 Run 在进程内已无执行器，订阅只会 409 并触发 EventSource 反复重连。
+            if (nextRun.archived) {
+                eventSource?.close()
+                eventSource = null
+                connectionState.value = 'archived'
+            } else {
+                connect(runId)
+            }
         } catch (cause) {
             error.value = cause instanceof Error ? cause.message : '无法打开会话'
         } finally {

@@ -23,7 +23,8 @@ src/main/resources/static/
 .codely-cli/
 
 # 打包运行时：内嵌 JRE 与离线安装包体积过大，由部署脚本按需下载
-runtime/
+# 必须锚定根目录：未锚定的 runtime/ 会连带忽略 src/**/runtime/ 下的 Java 源码包
+/runtime/
 deploy/runtime/
 
 # 知识库向量同步包（跨环境迁移用数据产物体积大）

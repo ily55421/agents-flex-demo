@@ -5,7 +5,7 @@ import type {AgentRun} from '@/types/agent'
 
 const props = defineProps<{
   run: AgentRun | null
-  connectionState: 'idle' | 'connecting' | 'live' | 'reconnecting'
+  connectionState: 'idle' | 'connecting' | 'live' | 'reconnecting' | 'archived'
 }>()
 
 /** 将内部 SSE 连接状态翻译为头部展示的中文状态。 */
@@ -14,6 +14,7 @@ const connectionLabel = computed(() => ({
   connecting: '正在连接',
   live: 'SSE 实时',
   reconnecting: '正在重连',
+  archived: '只读归档',
 }[props.connectionState]))
 </script>
 

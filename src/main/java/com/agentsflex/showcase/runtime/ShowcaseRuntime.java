@@ -327,7 +327,11 @@ public class ShowcaseRuntime {
         // 重启后的历史 Run 无法重建 Runner/Memory，直接返回 DuckDB 中的归档视图。
         if (archive != null) {
             Map<String, Object> archived = archive.loadRunSnapshot(runId);
-            if (archived != null) return archived;
+            if (archived != null) {
+                Map<String, Object> view = new LinkedHashMap<>(archived);
+                view.put("archived", true);
+                return view;
+            }
         }
         throw new IllegalArgumentException("Agent run not found: " + runId);
     }
@@ -526,12 +530,22 @@ public class ShowcaseRuntime {
      * @return Trace 面板使用的结构化数据
      */
     public Map<String, Object> trace(String runId) {
-        DemoRun run = requireRun(runId);
-        AgentTurn turn = run.runner.restore(runId);
-        finishTelemetry(run, turn);
-        // 查询 Trace 前主动 flush，避免周期 Metric exporter 尚未导出导致面板短暂为空。
-        run.telemetryRoute.forceFlush().join(2, TimeUnit.SECONDS);
-        return RunViewMapper.trace(run, turn);
+        DemoRun run = runs.get(runId);
+        if (run != null) {
+            AgentTurn turn = run.runner.restore(runId);
+            finishTelemetry(run, turn);
+            // 查询 Trace 前主动 flush，避免周期 Metric exporter 尚未导出导致面板短暂为空。
+            run.telemetryRoute.forceFlush().join(2, TimeUnit.SECONDS);
+            return RunViewMapper.trace(run, turn);
+        }
+        // 归档 Run 的 Span/Metric 随进程失效，但快照里的事件与预算仍可只读展示，不能因此 409。
+        if (archive != null) {
+            Map<String, Object> archived = archive.loadRunSnapshot(runId);
+            if (archived != null) {
+                return RunViewMapper.archivedTrace(archived);
+            }
+        }
+        throw new IllegalArgumentException("Agent run not found: " + runId);
     }
 
     /**

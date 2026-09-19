@@ -163,6 +163,8 @@ export interface AgentRun {
   retryPolicy: RetryPolicyView
   events: AgentEvent[]
   capabilities: CapabilitySource[]
+  /** 仅由归档快照读回、进程内已无执行器的 Run 为 true；缺省表示当前进程内的活跃 Run。 */
+  archived?: boolean
 }
 
 export interface TraceView {
@@ -178,6 +180,8 @@ export interface TraceView {
   metrics: TraceMetric[]
   events: AgentEvent[]
   source: 'AGENTS_FLEX_OPENTELEMETRY'
+  /** 归档 Run 的 Span 与 Metric 随原进程失效，此处仅保留快照里的事件时间线。 */
+  archived?: boolean
 }
 
 export interface TraceSpan {

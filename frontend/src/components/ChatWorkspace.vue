@@ -23,23 +23,24 @@ let scrollFrame: number | null = null
 /** 判断当前 Turn 是否已经结束；结束后输入会创建同一会话的下一轮 Turn。 */
 const isTerminal = computed(() => ['COMPLETED', 'FAILED', 'CANCELLED', 'MAX_ITERATIONS_REACHED',
   'MAX_STEPS_REACHED', 'BUDGET_EXCEEDED'].includes(props.run?.status ?? ''))
-/** 只有真实模型与已创建 Agent 都就绪，且当前没有运行中的 Turn 时才允许发送。 */
+/** 只有真实模型与已创建 Agent 都就绪，且当前没有运行中的 Turn 时才允许发送；归档会话不可续聊。 */
 const canSend = computed(() => Boolean(props.model?.configured) && props.agentReady
-    && (!props.run || isTerminal.value) && !props.busy)
+    && (!props.run || isTerminal.value) && !props.busy && !props.run?.archived)
 /** 判断是否应显示模型正在推进的占位消息。 */
 const isThinking = computed(() => Boolean(props.run?.processing || props.run?.status === 'RUNNING'))
 /** 把供应商标识转换为适合标题栏展示的文本。 */
 const providerLabel = computed(() => props.model?.provider?.toUpperCase() || 'MODEL')
 /** 头部统计摘要只读取当前 Snapshot，不额外发起请求。 */
 const headerStatistics = computed(() => props.run ? [
-  {label: 'Tokens', value: props.run.budget.usedTokens.toLocaleString()},
-  {label: 'Tools', value: `${props.run.budget.usedToolCalls}/${props.run.budget.toolCallLimit}`},
-  {label: 'Events', value: props.run.events.length.toLocaleString()},
+  {label: 'Token', value: props.run.budget.usedTokens.toLocaleString()},
+  {label: '工具', value: `${props.run.budget.usedToolCalls}/${props.run.budget.toolCallLimit}`},
+  {label: '事件', value: props.run.events.length.toLocaleString()},
 ] : [])
 /** 根据缺失前置条件和 Turn 状态给出准确的输入框提示。 */
 const composerPlaceholder = computed(() => {
   if (!props.model?.configured) return '请先到顶部「模型配置」页应用模型连接'
   if (!props.agentReady) return '模型已就绪，在左侧选择或到「Agent 维护」页创建 Agent 后即可输入对话'
+  if (props.run?.archived) return '归档会话仅供回看，点左上「新建会话」后可继续对话'
   if (props.busy) return '正在处理请求...'
   if (props.run && !isTerminal.value) return '当前 Turn 完成后可以继续追问'
   return props.run ? '继续追问...' : '输入你希望 AI Agent 完成的任务...'
@@ -48,6 +49,7 @@ const composerPlaceholder = computed(() => {
 const composerStatus = computed(() => {
   if (!props.model?.configured) return '真实模型尚未应用'
   if (!props.agentReady) return '创建 Agent 后即可开始对话'
+  if (props.run?.archived) return '该会话由上次运行归档而来，进程内已无执行器，只能回看不能续聊'
   if (props.busy) return '正在处理当前操作'
   return '当前 Turn 执行或等待人工操作时不能发送新消息'
 })

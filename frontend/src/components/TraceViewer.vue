@@ -121,8 +121,14 @@ function elapsed(event: AgentEvent) {
       <div><span>已导出片段</span><b>{{ spans.length }}</b></div>
     </div>
 
+    <p v-if="trace?.archived" class="trace-archived-note">
+      归档会话：Span 与指标随原进程失效，仅保留快照中的事件时间线与预算计数。
+    </p>
+
     <div class="trace-list span-tree">
-      <div v-if="!roots.length" class="trace-empty">等待 Agents-Flex 导出第一个链路片段</div>
+      <div v-if="!roots.length" class="trace-empty">
+        {{ trace?.archived ? '该会话的链路片段未随快照归档' : '等待 Agents-Flex 导出第一个链路片段' }}
+      </div>
       <template v-for="root in roots" :key="root.spanId">
         <article class="trace-row span-row" :data-status="root.status">
           <button type="button" :aria-expanded="expanded.has(root.spanId)" @click="toggle(root.spanId)">
