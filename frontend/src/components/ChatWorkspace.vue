@@ -138,6 +138,11 @@ onBeforeUnmount(() => {
           <IconBrain :size="25"/>
         </div>
         <h2>{{ agentReady ? '开始一次真实的 Agent 对话' : '请先创建 Agent' }}</h2>
+        <ol class="chat-empty-steps">
+          <li><span>1</span><div><b>选择或创建 Agent</b><small>左侧选已有 Agent，或到「Agent 维护」页创建</small></div></li>
+          <li><span>2</span><div><b>确认模型</b><small>右上角是当前模型，可在「模型配置」页切换</small></div></li>
+          <li><span>3</span><div><b>提问并观察</b><small>右侧事件流实时显示模型调用、工具执行与审批</small></div></li>
+        </ol>
         <p v-if="model?.configured && agentReady">输入研究问题后，系统会调用 {{
             model.model
           }}，并在需要时使用表单、工具和人工审批。</p>

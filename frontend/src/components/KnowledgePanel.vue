@@ -967,11 +967,11 @@ onMounted(async () => {
 
 .knowledge-mode {
   margin-left: auto;
-  font-size: 11.5px;
-  color: #047857;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  border-radius: 999px;
+  font-size: var(--font-caption);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: var(--radius-pill);
   padding: 1px 8px;
 }
 
@@ -979,8 +979,8 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
-  color: #4b5563;
+  font-size: var(--font-caption);
+  color: var(--text-soft);
   flex-wrap: wrap;
 }
 
@@ -990,8 +990,13 @@ onMounted(async () => {
 
 .knowledge-error-line {
   margin: 0;
-  font-size: 11.5px;
-  color: #b45309;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--font-caption);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .knowledge-actions {
@@ -1000,22 +1005,36 @@ onMounted(async () => {
 }
 
 .danger-text {
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .knowledge-add,
 .knowledge-search,
 .knowledge-docs {
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--border);
   padding-top: 10px;
 }
 
 .knowledge-add summary,
 .knowledge-docs h3 {
-  font-size: 13px;
-  color: #1f2937;
+  font-size: var(--font-small);
+  color: var(--text);
   margin: 0 0 8px;
   cursor: pointer;
+}
+
+/* 折叠块标题行做成可点击条：此前只有一个裸 ▶ 和一行字，看不出可展开。 */
+.knowledge-add > summary {
+  padding: 7px 9px;
+  margin-bottom: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.knowledge-add > summary:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .knowledge-add .field-block {
