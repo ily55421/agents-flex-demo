@@ -9,7 +9,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ newSession: []; open: [runId: string] }>()
 
-/** 与 RuntimeOverview 一致的状态中文标签，会话列表只展示精简映射。 */
+/** 运行状态中文标签：会话列表只展示精简映射。 */
 const STATUS_LABELS: Record<string, string> = {
   READY: '准备就绪',
   RUNNING: '执行中',

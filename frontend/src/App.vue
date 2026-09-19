@@ -143,25 +143,25 @@ onMounted(() => {
   <div class="app-shell">
     <AppHeader :run="run" :connection-state="connectionState"/>
     <nav class="page-tabs" aria-label="页面切换">
-      <button type="button" :class="{active: activeTab === 'workspace'}" @click="switchTab('workspace')">
-        <IconMessages :size="16"/>Agent 对话
+      <button type="button" :class="{active: activeTab === 'workspace'}" aria-label="Agent 对话" title="Agent 对话" @click="switchTab('workspace')">
+        <IconMessages :size="16"/><span class="tab-label">Agent 对话</span>
       </button>
-      <button type="button" :class="{active: activeTab === 'agents'}" @click="switchTab('agents')">
-        <IconRobot :size="16"/>Agent 维护
+      <button type="button" :class="{active: activeTab === 'agents'}" aria-label="Agent 维护" title="Agent 维护" @click="switchTab('agents')">
+        <IconRobot :size="16"/><span class="tab-label">Agent 维护</span>
       </button>
-      <button type="button" :class="{active: activeTab === 'models'}" @click="switchTab('models')">
-        <IconAdjustmentsHorizontal :size="16"/>模型配置
+      <button type="button" :class="{active: activeTab === 'models'}" aria-label="模型配置" title="模型配置" @click="switchTab('models')">
+        <IconAdjustmentsHorizontal :size="16"/><span class="tab-label">模型配置</span>
       </button>
-      <button type="button" :class="{active: activeTab === 'knowledge'}" @click="switchTab('knowledge')">
-        <IconDatabase :size="16"/>知识库
+      <button type="button" :class="{active: activeTab === 'knowledge'}" aria-label="知识库" title="知识库" @click="switchTab('knowledge')">
+        <IconDatabase :size="16"/><span class="tab-label">知识库</span>
       </button>
-      <button type="button" :class="{active: activeTab === 'graph'}" @click="switchTab('graph')">
-        <IconSitemap :size="16"/>图谱
+      <button type="button" :class="{active: activeTab === 'graph'}" aria-label="图谱" title="图谱" @click="switchTab('graph')">
+        <IconSitemap :size="16"/><span class="tab-label">图谱</span>
       </button>
     </nav>
 
     <!-- Agent 对话页：左侧会话历史 + Agent 选择，中间对话区，右侧事件流。 -->
-    <main v-if="activeTab === 'workspace'" id="main-content" class="dashboard-shell">
+    <main v-if="activeTab === 'workspace'" id="main-content" class="dashboard-shell" tabindex="-1">
       <aside class="left-rail">
         <AgentPicker :agent="agent" :busy="busy" @select="pickAgent"
                      @go-workshop="switchTab('agents')" @go-models="switchTab('models')"/>
@@ -207,22 +207,22 @@ onMounted(() => {
     </main>
 
     <!-- Agent 维护页：创建/重新配置 Agent，查看已创建清单并跳转对话。 -->
-    <main v-else-if="activeTab === 'agents'" id="main-content" class="workshop-shell">
+    <main v-else-if="activeTab === 'agents'" id="main-content" class="workshop-shell" tabindex="-1">
       <AgentWorkshop :agent="agent" :busy="busy" @create="createAgent" @go-chat="goChat"
                      @configure-embedding="configureEmbedding" @apply-model="applyModel"/>
     </main>
 
     <!-- 模型配置页：聊天模型与向量模型的独立维护入口。 -->
-    <main v-else-if="activeTab === 'models'" id="main-content" class="models-shell">
+    <main v-else-if="activeTab === 'models'" id="main-content" class="models-shell" tabindex="-1">
       <ModelConfigPage :model-status="modelStatus" @apply="applyModel"
                        @configure-embedding="configureEmbedding" @go-knowledge="switchTab('knowledge')"/>
     </main>
 
-    <main v-else-if="activeTab === 'graph'" class="graph-tab-shell">
+    <main v-else-if="activeTab === 'graph'" id="main-content" class="graph-tab-shell" tabindex="-1">
       <GraphExplorer/>
     </main>
 
-    <main v-else class="knowledge-shell">
+    <main v-else id="main-content" class="knowledge-shell" tabindex="-1">
       <KnowledgePanel ref="knowledgePanel"/>
     </main>
 
